@@ -1,0 +1,88 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dream-rsi"
+version = "0.1.0"
+description = "Strict §3 reproduction of the Dream-RSI discovery-tree / replay / Eq(1) loop (Windows native)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Dream-RSI §3 reproduction project" }]
+
+# The algorithm core is deliberately stdlib-only: replay and Eq(1) must stay
+# auditable and reproducible without a heavy dependency surface. Model backends
+# are optional extras so the offline suite runs on a bare Python.
+dependencies = []
+
+[project.optional-dependencies]
+dsh = ["deepseek-harness-sdk>=0.1.5rc1"]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11", "build>=1.2"]
+
+[project.scripts]
+dream-rsi = "dream_rsi.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra"
+filterwarnings = ["error::DeprecationWarning:dream_rsi.*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+# Frozen inputs. The reference oracle, its golden tests, and the specification
+# documents are the authority this project is graded against; a formatter must
+# never rewrite them, not even cosmetically. `ruff check --fix` skips these
+# paths entirely.
+extend-exclude = [
+    "reference",
+    "tests/test_oracle.py",
+    "specs",
+    "contracts",
+    "execution",
+    # Frozen copies of model-written policies used as held-out diagnostic inputs.
+    # Their SHA-256 is recorded and checked; rewriting one -- even to sort an
+    # import -- would change the program the recorded result describes.
+    "diagnostics/frozen",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
+ignore = ["E501"]
+# `∪` is the paper's action-set union in A(T) = {root} ∪ leaves(R). Rewriting it
+# to "U" would make the docstrings disagree with the specification. Same for the
+# mathematical symbols used in the Eq(1) notes.
+allowed-confusables = ["∪", "×", "≈", "π", "ρ", "λ", "σ", "→", "≥", "≤"]
+
+[tool.ruff.lint.per-file-ignores]
+# Frozen domain contract. `class X(str, Enum)` is deliberate: the DTOs are
+# JSON-serialized with `.value`, and str-mixin keeps them directly comparable to
+# the raw strings a resumed run reads back from SQLite. StrEnum would change
+# `str(x)` and break that round trip.
+"src/dream_rsi/domain/models.py" = ["UP042"]
+
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "src"
+packages = ["dream_rsi"]
+strict = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+
+# The DSH SDK ships no type stubs and no `py.typed`, so its imports cannot be
+# checked. This concedes nothing about *our* types: every call into the SDK is
+# still wrapped in code that is checked, and the adapter validates the shapes it
+# reads back at runtime.
+[[tool.mypy.overrides]]
+module = ["deepseek_harness", "deepseek_harness.*"]
+ignore_missing_imports = true

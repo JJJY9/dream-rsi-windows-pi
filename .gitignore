@@ -1,0 +1,33 @@
+# Python project
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# Secrets / model configuration
+.env
+.env.*
+!templates/.env.local.example
+config/.env.local
+config/*.secret*
+*.pem
+
+# Persistent runs and transcripts
+.runtime/
+state/
+reports/
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+
+# Local console and model-session logs
+*.log
+
+# Package artifacts
+*.zip

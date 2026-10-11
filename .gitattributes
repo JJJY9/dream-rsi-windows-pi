@@ -1,0 +1,15 @@
+# Line endings are load-bearing in this project, not cosmetic.
+#
+# `runtime/policy_development.validate_policy_source` rejects a policy whose
+# entry file does not use LF, and the Pi adapter speaks strict LF-delimited
+# JSONL. On Windows, git's default `core.autocrlf` would rewrite these files to
+# CRLF on checkout and silently break both. Pin LF for everything, so the
+# working tree, the index and any future clone all agree with what is on disk.
+* text=auto eol=lf
+
+# Binary-ish assets that must never be line-ending translated.
+*.png binary
+*.jpg binary
+*.pdf binary
+*.zip binary
+*.sqlite3 binary
