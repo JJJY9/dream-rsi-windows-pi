@@ -373,6 +373,32 @@ def test_accepted_revision_with_unusable_reply_cannot_pass(tmp_path: Path) -> No
     assert "policy_development.real_pi_calls" in failed
 
 
+def test_claude_transport_evidence_is_accepted(tmp_path: Path) -> None:
+    """The evidence checks read either transport's stored files.
+
+    A Claude run stores ``claude_request.json`` / ``claude_result.json`` where a
+    Pi run stores ``pi_request.json`` / ``pi_request.json.result.json``; the
+    checks must accept both without weakening what they verify.
+    """
+    fixture = _build(tmp_path)
+    try:
+        session = fixture.session_dir
+        (session / "pi_request.json").rename(session / "claude_request.json")
+        (session / "pi_request.json.result.json").rename(session / "claude_result.json")
+        discovery = fixture.cfg.run_root(fixture.run_id) / "agent" / "attempt-1"
+        (discovery / "pi.result.json").rename(discovery / "claude_result.json")
+        checks = verify_run.verify(
+            fixture.registry, fixture.cfg, fixture.run_id,
+            _expectations(rollout_cap=fixture.cfg.loop.K1),
+        )
+        failed = {row["check"] for row in checks.failed}
+    finally:
+        fixture.registry.close()
+    assert "revisions.prompt_carries_measured_feedback" not in failed
+    assert "policy_development.real_pi_calls" not in failed
+    assert "worlds.real_discovery" not in failed
+
+
 def test_declared_parameters_are_proven_against_the_run(tmp_path: Path) -> None:
     """Wrong declarations must fail loudly rather than check invented counts."""
     fixture = _build(tmp_path)

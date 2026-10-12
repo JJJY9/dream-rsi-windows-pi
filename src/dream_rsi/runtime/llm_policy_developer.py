@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ..adapters._pi_session import PiSessionResult, run_pi_prompt
+from ..adapters._pi_session import run_pi_prompt
 from ..adapters.claude_code import run_claude_prompt
 from .policy_development import Proposal, StaticCheck, validate_policy_source
 

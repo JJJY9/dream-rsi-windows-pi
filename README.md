@@ -39,7 +39,24 @@ For a live run, install and authenticate [Pi](https://github.com/earendil-works/
     --outer-rounds 3
 ```
 
-The bundled knapsack task is selected by default. `--developer llm` makes policy revisions with a model; `--developer scripted` is a diagnostic fixture and must not be reported as a fully live run. Run artifacts are written under `.runtime/`, which is excluded from Git.
+The bundled knapsack task is selected by default (`--task packing` selects the
+second demo task, a max-min-distance construction problem). `--developer llm`
+makes policy revisions with a model; `--developer scripted` is a diagnostic
+fixture and must not be reported as a fully live run. Run artifacts are written
+under `.runtime/`, which is excluded from Git.
+
+Alternatively, the **Claude Code backend** drives an installed `claude` CLI
+headlessly (`--backend claude` together with `--developer llm-claude`). Put
+`claude` on `PATH` or set `DREAM_RSI_CLAUDE_BIN` to the executable;
+authentication is whatever that CLI already has, and it is never asked for
+another tool's credentials:
+
+```powershell
+.\.venv\Scripts\python.exe -m dream_rsi.cli --project-root . run `
+    --backend claude --developer llm-claude --task packing `
+    --provider "YOUR_PROVIDER" --model "YOUR_MODEL" `
+    --outer-rounds 3
+```
 
 ## Evidence and limits
 

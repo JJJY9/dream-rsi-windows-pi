@@ -39,7 +39,16 @@ py -3 -m venv .venv
     --outer-rounds 3
 ```
 
-默认运行仓库附带的背包任务。`--developer llm` 使用模型修订策略；`--developer scripted` 只是诊断用的固定程序，不能当作完整的真实模型运行。运行产物写在 `.runtime/`，不会进入 Git。
+默认运行仓库附带的背包任务（`--task packing` 选择第二个演示任务：30 点最大最小距离构造问题）。`--developer llm` 使用模型修订策略；`--developer scripted` 只是诊断用的固定程序，不能当作完整的真实模型运行。运行产物写在 `.runtime/`，不会进入 Git。
+
+另外，**Claude Code 后端**可以无头驱动已安装的 `claude` CLI（`--backend claude` 搭配 `--developer llm-claude`）。把 `claude` 放进 `PATH`，或用 `DREAM_RSI_CLAUDE_BIN` 指向可执行文件；认证沿用该 CLI 自己的凭据，绝不读取其他工具的密钥：
+
+```powershell
+.\.venv\Scripts\python.exe -m dream_rsi.cli --project-root . run `
+    --backend claude --developer llm-claude --task packing `
+    --provider "YOUR_PROVIDER" --model "YOUR_MODEL" `
+    --outer-rounds 3
+```
 
 ## 验证边界
 
