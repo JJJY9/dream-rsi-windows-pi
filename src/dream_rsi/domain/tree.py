@@ -64,7 +64,7 @@ def _canonical_record(node: Node) -> dict[str, Any]:
     including it would make two runs that built the same world disagree.  The
     world id lives in the digest header instead of on every record.
     """
-    return {
+    record = {
         "node_id": node.node_id,
         "parent_id": node.parent_id,
         "creation_index": node.creation_index,
@@ -80,6 +80,10 @@ def _canonical_record(node: Node) -> dict[str, Any]:
         "error_type": node.error_type,
         "summary": node.summary,
     }
+    if node.observation_format != 1:
+        record.update(observation_format=node.observation_format,
+                      public_observation_json=node.public_observation_json)
+    return record
 
 
 def _world_digest(world_id: str, root_id: str, ordered: Sequence[Node]) -> str:
@@ -89,7 +93,7 @@ def _world_digest(world_id: str, root_id: str, ordered: Sequence[Node]) -> str:
     ASCII-only JSON, UTF-8 encoding, no wall-clock fields.
     """
     payload = {
-        "format": _WORLD_DIGEST_FORMAT,
+        "format": "dream-rsi-world-v2" if any(n.observation_format == 2 for n in ordered) else _WORLD_DIGEST_FORMAT,
         "world_id": world_id,
         "root_id": root_id,
         "node_count": len(ordered),
@@ -131,6 +135,7 @@ def _build_observation(
             evaluator_status=_status_value(n.evaluator_status),
             error_type=n.error_type,
             summary=n.summary,
+            observation_json=n.public_observation_json,
         )
         for n in selected
     )
@@ -149,6 +154,8 @@ def _root_record(
     workspace_snapshot_digest: str = "",
     observation_digest: str = "",
     summary: str = "",
+    observation_format: int = 1,
+    public_observation_json: str = "",
 ) -> Node:
     """The fixed initial workspace: parentless, index 0, score 0.0.
 
@@ -168,6 +175,8 @@ def _root_record(
         score=0.0,
         evaluator_status=EvaluatorStatus.SUCCESS,
         summary=summary,
+        observation_format=observation_format,
+        public_observation_json=public_observation_json,
     )
 
 
@@ -198,6 +207,8 @@ class DiscoveryTree:
         observation_digest: str,
         root_id: str = "root",
         summary: str = "",
+        observation_format: int = 1,
+        public_observation_json: str = "",
     ) -> DiscoveryTree:
         """Start a fresh tree whose root carries the fixed initial workspace."""
         tree = cls(world_id, root_id)
@@ -207,6 +218,8 @@ class DiscoveryTree:
             workspace_snapshot_digest=workspace_snapshot_digest,
             observation_digest=observation_digest,
             summary=summary,
+            observation_format=observation_format,
+            public_observation_json=public_observation_json,
         )
         tree._nodes[0] = root
         tree._by_id[root_id] = root
@@ -239,6 +252,8 @@ class DiscoveryTree:
         agent_session_digest: str | None = None,
         evaluator_result_digest: str | None = None,
         error_type: str | None = None,
+        observation_format: int = 1,
+        public_observation_json: str = "",
     ) -> Node:
         """Append one persisted attempt result as a child of ``parent_id``.
 
@@ -285,6 +300,8 @@ class DiscoveryTree:
             evaluator_result_digest=evaluator_result_digest,
             error_type=error_type,
             summary=summary,
+            observation_format=observation_format,
+            public_observation_json=public_observation_json,
         )
         self._nodes.append(node)
         self._by_id[node_id] = node

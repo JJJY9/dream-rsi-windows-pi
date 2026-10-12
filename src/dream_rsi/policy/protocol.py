@@ -16,6 +16,7 @@ the returned batch differs (online: really execute; offline: look up history).
 """
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
@@ -33,6 +34,13 @@ class PublicNode:
     evaluator_status: str
     error_type: str | None
     summary: str
+    observation_json: str = ""
+
+    @property
+    def public_observation(self) -> dict[str, Any]:
+        """A fresh public-data mapping; mutating it cannot change the stored world."""
+        value = json.loads(self.observation_json) if self.observation_json else {}
+        return dict(value)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -44,6 +52,7 @@ class PublicNode:
             "evaluator_status": self.evaluator_status,
             "error_type": self.error_type,
             "summary": self.summary,
+            "observation_json": self.observation_json,
         }
 
     @classmethod
@@ -57,6 +66,7 @@ class PublicNode:
             evaluator_status=str(data["evaluator_status"]),
             error_type=None if data.get("error_type") is None else str(data["error_type"]),
             summary=str(data.get("summary", "")),
+            observation_json=str(data.get("observation_json", "")),
         )
 
 

@@ -109,7 +109,7 @@ def test_loop_reaches_committed_with_sealed_worlds(outcome: Any) -> None:
 def test_selection_happened_after_the_first_world(outcome: Any) -> None:
     # t=0 has an empty H_t, so pi_0 is the incumbent by construction rather than
     # by winning a contest; only t>=1 selections are real contests.
-    assert [s.iteration_t for s in outcome.selections] == [1, 2]
+    assert [s.iteration_t for s in outcome.selections] == [1, 2, 3]
     assert any("H_t is empty" in note for note in outcome.notes)
 
 
@@ -121,7 +121,7 @@ def test_revisions_use_the_just_scored_version_and_feedback(
 
     config = _config(run_root, outcome.run_id)
     with Registry(config.db_path) as registry:
-        for t in (1, 2):
+        for t in (1, 2, 3):
             revisions = registry.list_revisions(outcome.run_id, t)
             assert [r.m for r in revisions] == [1, 2, 3]
             incumbent = registry.get_world(f"{outcome.run_id}-w{t-1}")

@@ -210,6 +210,8 @@ class Node(Serializable):
     evaluator_result_digest: str | None = None
     error_type: str | None = None
     summary: str = ""
+    observation_format: int = 1
+    public_observation_json: str = ""
     created_at: str = field(default_factory=utcnow_iso)
     schema_version: int = SCHEMA_VERSION
 
@@ -282,6 +284,8 @@ class ReplayEpisode(Serializable):
     no_progress_count: int = 0
     discovery_agent_calls: int = 0
     evaluator_calls: int = 0
+    trajectory_format: int = 1
+    decision_trace: tuple[str, ...] = ()
     created_at: str = field(default_factory=utcnow_iso)
     schema_version: int = SCHEMA_VERSION
 
@@ -289,7 +293,8 @@ class ReplayEpisode(Serializable):
     def from_dict(cls, data: Mapping[str, Any]) -> ReplayEpisode:
         return _load(cls, data, {"stop_reason": StopReason,
                                  "selected_batches": _batches,
-                                 "revealed_order": _strs})
+                                 "revealed_order": _strs,
+                                 "decision_trace": _strs})
 
 
 @dataclass(frozen=True)

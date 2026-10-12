@@ -53,10 +53,12 @@ from ..domain.models import (
 )
 from ..domain.tree import DiscoveryTree, SealedWorld
 from ..evaluator.protocol import Evaluator
+from ..policy.protocol import PrefixObservation
 from ..policy.runner import SubprocessPolicyRunner
 from ..score.equation1 import SCORE_FORMULA_VERSION, equation1
 from ..storage.cas import ContentAddressedStore
 from ..storage.sqlite_registry import Registry
+from .context import canonical, export_world
 from .online import (
     CallBudget,
     CallCounter,
@@ -118,6 +120,7 @@ class RunOutcome:
     policy_agent_calls: int = 0
     notes: tuple[str, ...] = ()
     budget: dict[str, Any] = field(default_factory=dict)
+    final_policy_id: str = ""
 
     @property
     def live(self) -> bool:
@@ -314,7 +317,7 @@ class Controller:
             shutil.copyfile(cfg.incumbent_policy_path, deployed_path)
         elif existing is not None and deployed_path.read_bytes() != cfg.incumbent_policy_path.read_bytes():
             raise IntegrityError(f"run {run_id} changed its incumbent policy file")
-        deployed_digest = self._digest_tree(policy_root)
+        deployed_digest = self.deps.store.put_file(deployed_path)
 
         incumbent_id = f"{run_id}-pi0"
         if self.deps.registry.get_policy(incumbent_id) is None:
@@ -345,12 +348,11 @@ class Controller:
                 self._resume_position(run_id, policy_root, incumbent_id)
             )
             selections = self._recorded_selections(run_id, worlds, incumbent_id)
-            if start_t >= self.loop.outer_rounds:
-                if run.state is not RunState.COMMITTED:
-                    self.deps.registry.update_run_state(run_id, RunState.COMMITTED, finished=True)
+            if start_t >= self.loop.outer_rounds and run.state is RunState.COMMITTED:
                 outcome.worlds = tuple(worlds)
                 outcome.selections = tuple(selections)
                 outcome.state = RunState.COMMITTED
+                outcome.final_policy_id = deployed_policy_id
                 self._note(f"run {run_id} was already committed; no work repeated")
                 outcome.notes = tuple(self.deps.notes)
                 return outcome
@@ -448,6 +450,7 @@ class Controller:
                 max_rounds=self.loop.K1,
                 live_rho=self.loop.live_rho,
                 store_digest=self._digest_path,
+                store=self.deps.store,
                 root_id=root_id,
                 on_batch_committed=self._make_batch_committer(run_id, world_id),
                 workspaces=WorkspaceMap(root_id=root_id),
@@ -483,6 +486,37 @@ class Controller:
                 self._emit(run_id, "run.blocked", reason=reason)
                 raise BlockedModelConfiguration(reason)
 
+        # Complete the final online+offline iteration. Intermediate selections
+        # run at the next iteration's start; this selection has no next rollout.
+        final_t = self.loop.outer_rounds
+        final_history = self._settle_history(run_id, final_t)
+        if final_history and not any(s.iteration_t == final_t for s in selections):
+            selection, episodes = self._select_policy(
+                run_id=run_id, iteration_t=final_t,
+                incumbent_id=deployed_policy_id, incumbent_path=deployed_path,
+                history_worlds=final_history,
+            )
+            replay_count += episodes
+            deployed_policy_id = selection.selected.policy_version_id
+            selected = self.deps.registry.get_policy(deployed_policy_id)
+            if selected is None:
+                raise IntegrityError("final selected policy vanished")
+            deployed_path = policy_root / f"pi_{final_t}.py"
+            deploy_policy(Path(selected.source_artifact_id), deployed_path)
+            assert_monotonic(selection)
+            selections.append(SelectionSummary(
+                iteration_t=final_t, selected_policy_id=deployed_policy_id,
+                deployed_policy_id=selection.deployed.policy_version_id,
+                deployed_again=selection.deployed_again, reason=selection.reason,
+                mean_values=tuple((c.policy_version_id, c.mean_value) for c in selection.ranking),
+            ))
+            self._emit(run_id, "policy.selected", iteration_t=final_t,
+                       selected=deployed_policy_id, deployed_again=selection.deployed_again,
+                       reason=selection.reason, final=True)
+        elif not final_history:
+            self._emit(run_id, "policy.final.skipped", reason="no scoreable historical world")
+        outcome.final_policy_id = deployed_policy_id
+
         # -- finish ---------------------------------------------------------
         state = RunState.COMMITTED
         self.deps.registry.update_run_state(run_id, state, finished=True)
@@ -506,18 +540,18 @@ class Controller:
 
     # ------------------------------------------------------------------ rollout glue
 
-    def _policy_select_fn(self, policy_path: Path) -> Callable[[object, float], object]:
+    def _policy_select_fn(self, policy_path: Path) -> Callable[[PrefixObservation, float], Any]:
         """A live session per batch: the policy is loaded fresh, never trusted in-process."""
         runner = self.deps.policy_runner
 
-        def _select(observation: object, rho: float) -> object:
+        def _select(observation: PrefixObservation, rho: float) -> Any:
             session = runner.open(
                 policy_path=policy_path,
                 policy_version_id=policy_path.stem,
                 session_key="online",
             )
             try:
-                return session.select(observation, rho)  # type: ignore[arg-type]
+                return session.select(observation, rho)
             finally:
                 session.close()
 
@@ -589,6 +623,14 @@ class Controller:
             if not sealed:
                 break
             world = sealed[0]
+            policy = self.deps.registry.get_policy(world.policy_version_id)
+            source = Path(policy.source_artifact_id) if policy is not None else None
+            deployment = policy_root / f"pi_{t}.py"
+            if source is None or not source.is_file() or not deployment.is_file():
+                raise IntegrityError(f"run {run_id} lost its deployed policy at t={t}")
+            if (deployment.read_bytes() != source.read_bytes()
+                    or hashlib.sha256(source.read_bytes()).hexdigest() != policy.source_sha256):  # type: ignore[union-attr]
+                raise IntegrityError(f"run {run_id} changed its deployed policy at t={t}")
             nodes = self.deps.registry.list_nodes(world.world_id)
             restored = SealedWorld.from_nodes(world.world_id, nodes, root_id=world.root_id)
             if (
@@ -609,17 +651,6 @@ class Controller:
             raise IntegrityError(f"run {run_id} is marked committed but has missing worlds")
         if any(w.outer_t > start_t and w.state is not WorldState.QUARANTINED for w in all_worlds):
             raise IntegrityError(f"run {run_id} has a gap in completed outer rounds")
-        if start_t == self.loop.outer_rounds:
-            last = summaries[-1]
-            path = policy_root / f"pi_{start_t-1}.py"
-            policy = self.deps.registry.get_policy(last.policy_version_id)
-            source = Path(policy.source_artifact_id) if policy is not None else None
-            if source is None or not source.is_file() or not path.is_file():
-                raise IntegrityError(f"committed run {run_id} lost its deployed policy")
-            if path.read_bytes() != source.read_bytes():
-                raise IntegrityError(f"committed run {run_id} changed its deployed policy")
-            return start_t, summaries, last.policy_version_id, path, None
-
         events = [
             e for e in self.deps.registry.list_events(run_id)
             if e.kind == "policy.selected" and e.payload.get("iteration_t") == start_t
@@ -627,6 +658,10 @@ class Controller:
         if len(events) > 1:
             raise IntegrityError(f"run {run_id} has multiple selections at t={start_t}")
         selected_id = str(events[0].payload["selected"]) if events else None
+        if (start_t == self.loop.outer_rounds and selected_id is None
+                and self.deps.registry.get_run(run_id).state is RunState.COMMITTED  # type: ignore[union-attr]
+                and any(w.state is WorldState.SEALED_SCOREABLE for w in summaries)):
+            raise IntegrityError("committed v2 run is missing its final policy selection")
         if start_t > 0 and selected_id is None and self.deps.registry.list_revisions(run_id, start_t):
             raise IntegrityError(
                 f"run {run_id} stopped during policy selection at t={start_t}; "
@@ -649,7 +684,8 @@ class Controller:
             if policy is None or not path.is_file():
                 raise IntegrityError(f"selected policy {selected_id} is missing on resume")
             source = Path(policy.source_artifact_id)
-            if not source.is_file() or hashlib.sha256(path.read_bytes()).digest() != hashlib.sha256(source.read_bytes()).digest():
+            if (not source.is_file() or path.read_bytes() != source.read_bytes()
+                    or hashlib.sha256(source.read_bytes()).hexdigest() != policy.source_sha256):
                 raise IntegrityError(f"selected policy {selected_id} changed before resume")
             return start_t, summaries, selected_id, path, selected_id
 
@@ -768,6 +804,9 @@ class Controller:
                 best_score=w.s_best,
                 policy_version_id=w.policy_version_id,
                 summary=f"sealed {w.state.value}",
+                contents_json=canonical(export_world(self.deps.store,
+                    self.deps.registry.list_nodes(w.world_id), world_id=w.world_id,
+                    outer_t=w.outer_t, world_digest=w.world_digest)),
             )
             for w in worlds
         )
@@ -1046,17 +1085,10 @@ class Controller:
         values: list[float] = []
         digests: list[str] = []
         episodes_total = 0
-        runner = self.deps.policy_runner
-
         for world in worlds:
-            session = runner.open(
-                policy_path=path,
-                policy_version_id=version.version_id,
-                session_key=world.world_id,
-            )
             try:
                 episodes = replay_all_rhos(
-                    world, session.select,
+                    world, self._policy_select_fn(path),
                     policy_version_id=version.version_id,
                     rho_grid=self.loop.rho_grid,
                     max_parallelism=self.loop.W,
@@ -1067,9 +1099,6 @@ class Controller:
                            version_id=version.version_id, world_id=world.world_id,
                            reason=str(exc)[:300])
                 return None, episodes_total
-            finally:
-                session.close()
-
             for episode in episodes:
                 if episode.discovery_agent_calls or episode.evaluator_calls:
                     raise IntegrityError(
@@ -1151,6 +1180,7 @@ class Controller:
                     f"stop={episode.stop_reason.value}, batches={episode.selected_batches}, "
                     f"revealed={episode.revealed_order}"
                 )
+                lines.extend(f"    decision={step}" for step in episode.decision_trace)
         return tuple(lines)
 
     @staticmethod

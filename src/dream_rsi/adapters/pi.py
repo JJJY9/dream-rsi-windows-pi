@@ -17,6 +17,7 @@ await right, and an await bug is exactly the one that fabricates successes.
 """
 from __future__ import annotations
 
+import json
 import shutil
 import sys
 import time
@@ -25,7 +26,14 @@ from pathlib import Path
 
 from ..domain.errors import BlockedModelConfiguration
 from ._pi_session import run_pi_prompt
-from .base import GeneratedAttempt, HistoryEntry, TaskSpec, digest_file, digest_text
+from .base import (
+    ContinuationContext,
+    GeneratedAttempt,
+    HistoryEntry,
+    TaskSpec,
+    digest_file,
+    digest_text,
+)
 from .dsh import build_prompt
 
 #: How much longer the parent waits than the child's own ceiling.
@@ -82,6 +90,7 @@ class PiDiscoveryBackend:
         history: Sequence[HistoryEntry],
         output_workspace: Path,
         invocation_id: str,
+        context: ContinuationContext | None = None,
     ) -> GeneratedAttempt:
         started = time.monotonic()
         parent_workspace = Path(parent_workspace).resolve()
@@ -98,7 +107,7 @@ class PiDiscoveryBackend:
             request={
                 # The worker is told the ceiling it is actually under, taken
                 # from the same attribute that stops the call.
-                "prompt": build_prompt(task, history, time_limit_s=self.timeout_s),
+                "prompt": build_prompt(task, history, time_limit_s=self.timeout_s, context=context),
                 "cwd": str(output_workspace),
                 "provider": self.provider,
                 "model": self.model,
@@ -140,6 +149,13 @@ class PiDiscoveryBackend:
             summary=result.final_text.strip()[:500],
             session_id=result.session_id,
             raw_response_digest=digest_text(result.final_text) or None,
+            generation_record={"request": json.loads((run_dir / "pi_request.json").read_text(encoding="utf-8"))
+                               if (run_dir / "pi_request.json").exists() else {},
+                               "final_response": result.final_text,
+                               "events": [json.loads(line) for line in
+                                          (run_dir / "pi_request.json.history.jsonl").read_text(encoding="utf-8").splitlines()]
+                               if (run_dir / "pi_request.json.history.jsonl").exists() else [],
+                               "error_type": result.error_type},
             extra={
                 "is_live": True,
                 "event_types": list(result.event_types),

@@ -184,8 +184,19 @@ def _collect_assistant_text(record: dict[str, Any]) -> str:
     return ""
 
 
+class HistoryTrace(EventTrace):
+    """Complete semantic records for inheritance; streaming deltas are redundant."""
+
+    def write(self, record: dict[str, Any]) -> None:
+        if record.get("type") in {
+            "message_end", "tool_execution_end", "agent_error", "extension_error", "error",
+        }:
+            self._write_line(json.dumps(record, ensure_ascii=False))
+
+
 def run_request(
     request: dict[str, Any], trace: EventTrace | None = None,
+    history: EventTrace | None = None,
 ) -> dict[str, Any]:
     exe = shutil.which("pi")
     if not exe:
@@ -233,6 +244,8 @@ def run_request(
     def observe(record: dict[str, Any]) -> None:
         if trace is not None:
             trace.write(record)
+        if history is not None:
+            history.write(record)
         kind = str(record.get("type", ""))
         seen.append(kind)
         if kind in ("agent_error", "extension_error", "error"):
@@ -348,13 +361,15 @@ def _dispatch(request_path: Path, trace_path: Path) -> dict[str, Any]:
     to the wrong process.
     """
     trace = EventTrace(trace_path).open()
+    history = HistoryTrace(Path(str(request_path) + ".history.jsonl")).open()
     try:
         request = json.loads(request_path.read_text(encoding="utf-8"))
-        return run_request(request, trace)
+        return run_request(request, trace, history)
     except Exception as exc:
         return {"ok": False, "error_type": type(exc).__name__, "error": str(exc)[:600]}
     finally:
         trace.close()
+        history.close()
 
 
 if __name__ == "__main__":

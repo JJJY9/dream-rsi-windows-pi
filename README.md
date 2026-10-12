@@ -2,7 +2,7 @@
 
 **Language:** English | [简体中文](README.zh-CN.md)
 
-This repository independently implements the core loop in [Dream-RSI §3](https://arxiv.org/abs/2609.14858) on native Windows. It is not the authors' official code. The implementation has been exercised with a real Pi discovery agent, a real model writing policy revisions, a fixed evaluator, and deterministic replay. The DSH adapter is included but has not passed a live acceptance run. The paper's §4 benchmarks are not reproduced here.
+This repository independently implements the core loop in [Dream-RSI v2 §3](https://arxiv.org/abs/2609.14858v2) on native Windows. It is not the authors' official code. The earlier revision was exercised with real Pi discovery and model-written policies. The v2 context and consistency changes have separate [acceptance evidence](docs/V2_ACCEPTANCE.md); that earlier live audit does not validate new code. The DSH adapter is included but has not passed a live acceptance run. The paper's §4 benchmarks are not reproduced here.
 
 The repository currently publishes the **algorithm and a small knapsack demonstration task**. A separate MOF screening experiment is being redesigned with a larger worker setting. Its previous runs are exploratory and are not evidence of improved MOF discovery, so no MOF result is claimed in this release.
 
