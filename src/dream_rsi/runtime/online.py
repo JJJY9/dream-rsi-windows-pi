@@ -16,6 +16,7 @@ node→workspace association lives here in a :class:`WorkspaceMap` that the
 controller persists alongside the tree. Keeping paths out of the world records
 is what lets a world be rebuilt on another machine and still replay identically.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -26,11 +27,21 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
-from ..adapters.base import DiscoveryBackend, GeneratedAttempt, HistoryEntry, TaskSpec
+from ..adapters.base import (
+    ContinuationContext,
+    DiscoveryBackend,
+    GeneratedAttempt,
+    HistoryEntry,
+    TaskSpec,
+)
+from ..config import DIGEST_EXCLUDES
 from ..domain.models import EvaluatorStatus, Node, new_id
 from ..domain.tree import DiscoveryTree
 from ..evaluator.protocol import EvaluationResult, Evaluator
+from ..policy.protocol import PrefixObservation
 from ..policy.validation import validate_batch
+from ..storage.cas import ContentAddressedStore
+from .context import OBSERVATION_FORMAT, branch_chain, canonical
 
 BatchCallback = Callable[[int, DiscoveryTree, Sequence[Node]], None]
 
@@ -163,6 +174,7 @@ class CountingBackend:
         history: Sequence[HistoryEntry],
         output_workspace: Path,
         invocation_id: str,
+        context: ContinuationContext | None = None,
     ) -> GeneratedAttempt:
         self._counter.bump()
         return self._inner.generate(
@@ -171,6 +183,7 @@ class CountingBackend:
             history=history,
             output_workspace=output_workspace,
             invocation_id=invocation_id,
+            context=context,
         )
 
 
@@ -234,13 +247,6 @@ def _materialize(parent_workspace: Path, output_workspace: Path) -> None:
         shutil.copytree(parent_workspace, output_workspace, dirs_exist_ok=True)
 
 
-def _digest_of(store_digest: Callable[[Path], str], path: Path) -> str:
-    try:
-        return store_digest(path)
-    except OSError:
-        return ""
-
-
 def _run_one_attempt(
     *,
     parent_id: str,
@@ -254,10 +260,23 @@ def _run_one_attempt(
     workspace_root: Path,
     tree: DiscoveryTree,
     store_digest: Callable[[Path], str],
+    store: ContentAddressedStore,
+    mutation_lock: Lock,
 ) -> AttemptOutcome:
     invocation_id = new_id("attempt")
     output_workspace = (workspace_root / invocation_id).resolve()
-    output_workspace.mkdir(parents=True, exist_ok=True)
+    parent = tree.node(parent_id)
+    store.restore_tree(parent.workspace_snapshot_digest, output_workspace)
+    context = ContinuationContext(
+        parent_id=parent_id,
+        branch_observations=branch_chain(tree.nodes(), parent_id, store),
+        completed_worlds=tuple(entry.contents_json for entry in history),
+        directory=store.root.parent / "ctx" / invocation_id[-16:],
+    )
+    context.materialize(store)
+    context_digest = store.put_json(context.to_dict())
+    assert context.directory is not None
+    parent_workspace = context.directory / context.workspace_path(parent.workspace_snapshot_digest)
 
     attempt_error: str | None = None
     generated = None
@@ -268,6 +287,7 @@ def _run_one_attempt(
             history=history,
             output_workspace=output_workspace,
             invocation_id=invocation_id,
+            context=context,
         )
         if not generated.succeeded:
             attempt_error = generated.error_type or "AGENT_FAILED"
@@ -289,28 +309,71 @@ def _run_one_attempt(
         score = 0.0
         attempt_error = attempt_error or evaluation.error_type or "EVALUATION_ERROR"
 
-    entry_path = output_workspace / task.entry_filename
-    workspace_digest = _digest_of(store_digest, output_workspace)
+    workspace_digest = store.put_tree(output_workspace, exclude=DIGEST_EXCLUDES)
     summary = (generated.summary if generated is not None else "") or ""
     if attempt_error:
         summary = f"[attempt error: {attempt_error}] {summary}".strip()
 
-    node = tree.add_child(
-        parent_id=parent_id,
-        node_id=new_id("node"),
-        round_index=round_index,
-        branch_index=branch_index,
-        workspace_snapshot_digest=workspace_digest,
-        observation_digest=_digest_of(store_digest, entry_path)
-        if entry_path.exists()
-        else workspace_digest,
-        score=score,
-        evaluator_status=evaluation.status,
-        summary=summary[:500],
-        agent_session_digest=generated.raw_response_digest if generated is not None else None,
-        evaluator_result_digest=evaluation.result_digest,
-        error_type=attempt_error,
+    node_id = new_id("node")
+    evaluation_digest = store.put_json(
+        {
+            "format": "dream-rsi-evaluation-v2",
+            "score": score,
+            "status": evaluation.status.value,
+            "error_type": evaluation.error_type,
+            "detail": dict(evaluation.detail),
+            "public_detail": dict(evaluation.public_detail),
+            "original_result_digest": evaluation.result_digest,
+        }
     )
+    generation_digest = store.put_json(
+        {
+            "format": "dream-rsi-generation-v2",
+            "invocation_id": invocation_id,
+            "context_digest": context_digest,
+            "summary": generated.summary if generated else "",
+            "record": dict(generated.generation_record) if generated else {},
+            "error_type": attempt_error,
+        }
+    )
+    public = {
+        "score": score,
+        "status": evaluation.status.value,
+        "error_type": attempt_error,
+        "diagnostics": dict(evaluation.public_detail),
+        "generation_summary": generated.summary if generated else "",
+    }
+    observation_digest = store.put_json(
+        {
+            "format": OBSERVATION_FORMAT,
+            "world_id": tree.world_id,
+            "node_id": node_id,
+            "parent_id": parent_id,
+            "parent_observation_digest": parent.observation_digest,
+            "workspace_snapshot_digest": workspace_digest,
+            "context_digest": context_digest,
+            "generation_digest": generation_digest,
+            "public": public,
+        }
+    )
+    # Tree creation indices must be assigned atomically under parallel workers.
+    with mutation_lock:
+        node = tree.add_child(
+            parent_id=parent_id,
+            node_id=node_id,
+            round_index=round_index,
+            branch_index=branch_index,
+            workspace_snapshot_digest=workspace_digest,
+            observation_digest=observation_digest,
+            score=score,
+            evaluator_status=evaluation.status,
+            summary=summary[:500],
+            agent_session_digest=generation_digest,
+            evaluator_result_digest=evaluation_digest,
+            error_type=attempt_error,
+            observation_format=2,
+            public_observation_json=canonical(public),
+        )
     return AttemptOutcome(
         parent_id=parent_id,
         node=node,
@@ -328,7 +391,7 @@ def run_online_rollout(
     world_id: str,
     outer_t: int,
     task: TaskSpec,
-    policy_select: Callable[[object, float], object],
+    policy_select: Callable[[PrefixObservation, float], Any],
     backend: DiscoveryBackend,
     evaluator: Evaluator,
     workspace_root: Path,
@@ -338,6 +401,7 @@ def run_online_rollout(
     max_rounds: int,
     live_rho: float,
     store_digest: Callable[[Path], str],
+    store: ContentAddressedStore | None = None,
     root_id: str = "root",
     on_batch_committed: BatchCallback | None = None,
     workspaces: WorkspaceMap | None = None,
@@ -364,15 +428,28 @@ def run_online_rollout(
     root_workspace = Path(root_workspace).resolve()
     workspace_root.mkdir(parents=True, exist_ok=True)
 
-    root_digest = _digest_of(store_digest, root_workspace)
+    store = store or ContentAddressedStore(workspace_root / ".cas")
+    mutation_lock = Lock()
+    root_digest = store.put_tree(root_workspace, exclude=DIGEST_EXCLUDES)
+    root_observation = store.put_json(
+        {
+            "format": OBSERVATION_FORMAT,
+            "world_id": world_id,
+            "node_id": root_id,
+            "parent_id": None,
+            "workspace_snapshot_digest": root_digest,
+            "generation_digest": None,
+            "public": {"score": 0.0, "status": "INITIAL", "diagnostics": {}},
+        }
+    )
     tree = DiscoveryTree.new_root(
         world_id=world_id,
         root_id=root_id,
         workspace_snapshot_digest=root_digest,
-        observation_digest=_digest_of(store_digest, root_workspace / task.entry_filename)
-        if (root_workspace / task.entry_filename).exists()
-        else root_digest,
+        observation_digest=root_observation,
         summary=f"root workspace for world t={outer_t}",
+        observation_format=2,
+        public_observation_json=canonical({"score": 0.0, "status": "INITIAL", "diagnostics": {}}),
     )
     ws_map = workspaces if workspaces is not None else WorkspaceMap(root_id=root_id)
     ws_map.root_id = root_id
@@ -420,6 +497,8 @@ def run_online_rollout(
                     workspace_root=workspace_root,
                     tree=tree,
                     store_digest=store_digest,
+                    store=store,
+                    mutation_lock=mutation_lock,
                 )
                 for branch_index, (parent_id, parent_ws) in enumerate(parents)
             ]

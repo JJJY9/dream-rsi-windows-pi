@@ -104,7 +104,7 @@ class InProcessPolicySession:
 
 
 class SubprocessPolicySession:
-    """One worker process, one replay episode, K2 request/response round trips."""
+    """One contained worker; the controller opens a fresh one per decision."""
 
     isolated = True
 
@@ -130,7 +130,9 @@ class SubprocessPolicySession:
         self._dead = False
 
         self._proc = subprocess.Popen(
-            [python_executable, "-m", "dream_rsi.policy._policy_worker", str(self.policy_path)],
+            # The worker and accepted policies are stdlib-only. Skipping site
+            # avoids unrelated .pth/sitecustomize code on every fresh decision.
+            [python_executable, "-S", str(Path(__file__).with_name("_policy_worker.py")), str(self.policy_path)],
             cwd=str(self.cwd),
             env=policy_env(),
             stdin=subprocess.PIPE,
@@ -159,7 +161,12 @@ class SubprocessPolicySession:
         if self._dead:
             return
         self._dead = True
-        terminate_tree(self._proc, self._job)
+        if self._proc.poll() is None:
+            terminate_tree(self._proc, self._job)
+        else:
+            # A normally closed worker has already been reaped. Its Job Object
+            # still contains descendants; avoid taskkill on a released PID.
+            self._job.terminate()
 
     def select(self, observation: PrefixObservation, rho: float) -> Any:
         if self._dead:

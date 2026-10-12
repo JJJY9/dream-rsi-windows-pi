@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from ..runtime.context import ContinuationContext
+
 
 @dataclass(frozen=True)
 class TaskSpec:
@@ -50,6 +52,9 @@ class HistoryEntry:
     policy_version_id: str
     summary: str = ""
 
+    # Complete public world export as canonical JSON, never a hidden current tree.
+    contents_json: str = ""
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "outer_t": self.outer_t,
@@ -58,6 +63,7 @@ class HistoryEntry:
             "best_score": self.best_score,
             "policy_version_id": self.policy_version_id,
             "summary": self.summary,
+            "contents_json": self.contents_json,
         }
 
 
@@ -75,6 +81,7 @@ class GeneratedAttempt:
     session_id: str | None = None
     raw_response_digest: str | None = None
     extra: Mapping[str, Any] = field(default_factory=dict)
+    generation_record: Mapping[str, Any] = field(default_factory=dict)
 
 
 class DiscoveryBackend(Protocol):
@@ -91,6 +98,7 @@ class DiscoveryBackend(Protocol):
         history: Sequence[HistoryEntry],
         output_workspace: Path,
         invocation_id: str,
+        context: ContinuationContext | None = None,
     ) -> GeneratedAttempt: ...
 
 
@@ -105,6 +113,7 @@ def digest_text(text: str) -> str:
 
 
 __all__ = [
+    "ContinuationContext",
     "DiscoveryBackend",
     "GeneratedAttempt",
     "HistoryEntry",

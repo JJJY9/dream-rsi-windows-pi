@@ -54,6 +54,10 @@ def _load_policy(path: str) -> Any:
 
 
 def main(argv: list[str]) -> int:
+    # The runner uses -S, including when installed as a wheel. Add only the
+    # trusted framework package root; no environment PYTHONPATH is required.
+    framework_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, framework_root)
     if len(argv) != 2:
         _send({"id": None, "ok": False, "error_type": "USAGE",
                "error": "usage: _policy_worker.py <policy_path>"})

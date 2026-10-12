@@ -48,8 +48,11 @@ sys.path.insert(0, str(REPO / "src"))
 from dream_rsi.config import load_config  # noqa: E402
 from dream_rsi.domain.models import PolicyState, RunState, WorldState  # noqa: E402
 from dream_rsi.domain.tree import SealedWorld  # noqa: E402
+from dream_rsi.runtime.context import export_world, validate_world_artifacts  # noqa: E402
 from dream_rsi.runtime.llm_policy_developer import extract_policy  # noqa: E402
+from dream_rsi.runtime.replay import validate_episode_trace  # noqa: E402
 from dream_rsi.score.equation1 import equation1  # noqa: E402
+from dream_rsi.storage.cas import ContentAddressedStore  # noqa: E402
 from dream_rsi.storage.sqlite_registry import Registry  # noqa: E402
 
 #: The status a revision carries once its proposal survived screening and was
@@ -73,6 +76,9 @@ class Expectations:
     outer_rounds: int
     K1: int
     M: int
+    K2: int = 6
+    W: int = 4
+    agent_timeout_s: float | None = None
 
 
 class Checks:
@@ -161,7 +167,9 @@ def verify(
             developer=expect.developer,
             provider=expect.provider,
             model=expect.model,
-            overrides={"outer_rounds": expect.outer_rounds, "K1": expect.K1, "M": expect.M},
+            overrides={"outer_rounds": expect.outer_rounds, "K1": expect.K1,
+                       "M": expect.M, "K2": expect.K2, "W": expect.W},
+            agent_timeout_s=expect.agent_timeout_s,
         )
         provenance_detail["rebuilt_cfg_digest"] = rebuilt.cfg_digest
         provenance_detail["recorded_cfg_digest"] = run.cfg_digest
@@ -173,6 +181,8 @@ def verify(
             and provenance_detail["provider_matches"]
             and provenance_detail["model_matches"]
         )
+        if provenance_ok:
+            config = rebuilt
         detail = (
             f"declared parameters reproduce run.cfg_digest {run.cfg_digest[:16]}…"
             if provenance_ok else
@@ -186,6 +196,22 @@ def verify(
 
     # ------------------------------------------------------------------ worlds
     worlds = registry.list_worlds(run_id)
+    artifact_problems: list[str] = []
+    previous_exports: list[dict[str, Any]] = []
+    store = ContentAddressedStore(config.cas_root)
+    for world in sorted(worlds, key=lambda w: w.outer_t):
+        if world.state not in (WorldState.SEALED_SCOREABLE, WorldState.SEALED_UNSCOREABLE):
+            continue
+        nodes = registry.list_nodes(world.world_id)
+        try:
+            validate_world_artifacts(store, nodes, previous_exports)
+            previous_exports.append(export_world(store, nodes, world_id=world.world_id,
+                outer_t=world.outer_t, world_digest=world.world_digest))
+        except Exception as exc:
+            artifact_problems.append(f"{world.world_id}: {type(exc).__name__}: {exc}")
+    checks.add("discovery.complete_context_and_artifacts", not artifact_problems,
+               "checked actual snapshots, observations, parent chains and ALL prior world content",
+               problems=artifact_problems)
     tampered: list[str] = []
     unscoreable: list[str] = []
     for world in worlds:
@@ -391,7 +417,7 @@ def verify(
     # A pair required at two rounds is one pair, and reuse of a cached pair
     # therefore still yields exactly one score row.
     required: dict[tuple[str, str], list[str]] = {}
-    for t in sorted({w.outer_t for w in worlds}):
+    for t in range(1, expect.outer_rounds + 1):
         if t < 1:
             continue  # t=0 contests nothing: §3 has no history to select on
         h_t = [w for w in worlds if w.outer_t < t]
@@ -432,6 +458,7 @@ def verify(
             missing_pairs.append(entry)
 
     replay_problems: list[str] = []
+    trace_problems: list[str] = []
     recompute_problems: list[str] = []
     calls: list[str] = []
     episode_total = 0
@@ -449,6 +476,14 @@ def verify(
                     f"{vid} on {world_id}: rhos {rhos}, expected {sorted(config.loop.rho_grid)}"
                 )
             for episode in episodes:
+                try:
+                    world_row = registry.get_world(world_id)
+                    assert world_row is not None
+                    world = SealedWorld.from_nodes(world_id, registry.list_nodes(world_id),
+                                                   root_id=world_row.root_id)
+                    validate_episode_trace(world, episode, config.loop.W, config.loop.K2)
+                except Exception as exc:
+                    trace_problems.append(f"{episode.episode_id}: {type(exc).__name__}: {exc}")
                 if episode.discovery_agent_calls or episode.evaluator_calls:
                     calls.append(
                         f"{vid} on {world_id} rho={episode.rho}: "
@@ -499,12 +534,15 @@ def verify(
         if not recompute_problems else "a stored score does not follow from its replays",
         problems=recompute_problems,
     )
+    checks.add("replay.complete_decision_traces", not trace_problems,
+               "reconstructed decisions, visible prefixes, reveals and episode digest",
+               problems=trace_problems)
 
     # --------------------------------------------------------------- selection
     selection_rows: list[dict[str, Any]] = []
     selection_problems: list[str] = []
     history = [w for w in worlds if w.state is WorldState.SEALED_SCOREABLE]
-    for t in sorted({p.iteration_t for p in policies.values()}):
+    for t in range(1, expect.outer_rounds + 1):
         h_t = [w for w in history if w.outer_t < t]
         if not h_t:
             continue  # t=0 has an empty history: no contest, nothing to check
@@ -697,7 +735,7 @@ def verify(
         (n.round_index for n in all_nodes if n.parent_id is not None), default=-1
     ) + 1
     derived_m = max((r.m for r in revisions), default=0) + 1
-    expected_selections = expect.outer_rounds - 1
+    expected_selections = expect.outer_rounds
     completion_problems: list[str] = []
     if run.state is not RunState.COMMITTED:
         completion_problems.append(f"state is {run.state.value}, not COMMITTED")
@@ -778,6 +816,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--expect-outer-rounds", type=int, default=3)
     ap.add_argument("--expect-k1", type=int, default=2)
     ap.add_argument("--expect-versions", type=int, default=3)
+    ap.add_argument("--expect-k2", type=int, default=6)
+    ap.add_argument("--expect-workers", type=int, default=4)
+    ap.add_argument("--expect-agent-timeout-s", type=float, default=None)
     args = ap.parse_args(argv[1:])
 
     root = Path(args.project_root).resolve()
@@ -786,6 +827,8 @@ def main(argv: list[str]) -> int:
         backend=args.expect_backend, developer=args.expect_developer,
         provider=args.expect_provider, model=args.expect_model,
         outer_rounds=args.expect_outer_rounds, K1=args.expect_k1, M=args.expect_versions,
+        K2=args.expect_k2, W=args.expect_workers,
+        agent_timeout_s=args.expect_agent_timeout_s,
     )
     supplied = [a for a in argv[1:] if a.startswith("--expect-")]
     source = ("command line" if supplied

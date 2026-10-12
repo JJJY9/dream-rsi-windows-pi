@@ -11,6 +11,7 @@ Only immutable artifacts live here: workspace snapshots, evaluator traces,
 policy sources, JSON manifests. Credentials are never written to the store,
 nothing is ever unpickled, and no path outside the store root is written.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -31,7 +32,6 @@ _CHUNK_SIZE = 1024 * 1024
 _STAGING_DIR = "_staging"
 _HEX_DIGITS = frozenset("0123456789abcdef")
 _LINK_MARKER = "LINK:"
-_SPECIAL_MARKER = "SPECIAL"
 
 
 def _validate_digest(digest: str) -> str:
@@ -114,7 +114,11 @@ def _relative_posix(root: Path, path: Path) -> str:
 
 
 def _collect_tree_entries(
-    root: Path, current: Path, patterns: Sequence[str], out: list[tuple[str, str]]
+    root: Path,
+    current: Path,
+    patterns: Sequence[str],
+    out: list[tuple[str, str]],
+    store_file: Any,
 ) -> None:
     """Collect ``(relative_posix_path, marker)`` for files and links below ``current``.
 
@@ -126,24 +130,27 @@ def _collect_tree_entries(
         entries = list(iterator)
     for entry in entries:
         rel_posix = _relative_posix(root, Path(entry.path))
+        if "\n" in rel_posix or "\0" in rel_posix:
+            raise IntegrityError("snapshot names must not contain newlines or NUL")
         if _excluded(rel_posix, entry.name, patterns):
             continue
         if _is_link(entry):
-            target = os.readlink(entry.path)
             resolved = Path(entry.path).resolve()
             if not _is_within(resolved, root):
                 raise IntegrityError(
                     f"refusing to traverse {rel_posix!r}: link target escapes the tree root"
                 )
-            out.append((rel_posix, f"{_LINK_MARKER}{target}"))
+            target = resolved.relative_to(root).as_posix()
+            out.append((rel_posix, f"{_LINK_MARKER}{target}" + ("/" if resolved.is_dir() else "")))
         elif entry.is_dir(follow_symlinks=False):
-            _collect_tree_entries(root, Path(entry.path), patterns, out)
+            out.append((rel_posix, "DIR"))
+            _collect_tree_entries(root, Path(entry.path), patterns, out, store_file)
         elif entry.is_file(follow_symlinks=False):
-            out.append((rel_posix, _hash_file(Path(entry.path))))
+            out.append((rel_posix, store_file(Path(entry.path))))
         else:
             # Sockets/pipes/devices: never read them, but keep them visible to
             # the digest so their appearance or removal is still detected.
-            out.append((rel_posix, _SPECIAL_MARKER))
+            raise IntegrityError(f"cannot snapshot special file {rel_posix!r}")
 
 
 class ContentAddressedStore:
@@ -215,12 +222,12 @@ class ContentAddressedStore:
         return digest
 
     def put_tree(self, directory: Path, *, exclude: Sequence[str] = ()) -> str:
-        """Hash a directory deterministically and return the tree digest.
+        """Store every file plus a deterministic TREE2 manifest; return its digest.
 
         The digest is the sha256 of the manifest text built by walking files
         sorted by relative POSIX path and appending ``relative/path\\0<sha256
-        of contents>\\n`` for every file (the exact rule documented in
-        ``contracts/SCHEMAS.md``'s snapshot section). Symlinks and junctions are
+        of contents>\\n`` for every file, preceded by the ``TREE2\\n`` header.
+        Empty directories have ``DIR`` entries. Symlinks and junctions are
         recorded as ``relative/path\\0LINK:<target>\\n`` and never traversed; a
         link whose target resolves outside the tree raises
         :class:`IntegrityError`. Entries matching ``exclude`` (a bare name at
@@ -236,10 +243,11 @@ class ContentAddressedStore:
         resolved_root = root.resolve()
         patterns = tuple(str(pattern) for pattern in exclude)
         records: list[tuple[str, str]] = []
-        _collect_tree_entries(resolved_root, resolved_root, patterns, records)
+        _collect_tree_entries(resolved_root, resolved_root, patterns, records, self.put_file)
         records.sort(key=lambda record: record[0])
         hasher = hashlib.sha256()
-        manifest = bytearray()
+        manifest = bytearray(b"TREE2\n")
+        hasher.update(manifest)
         for rel_posix, marker in records:
             line = f"{rel_posix}\0{marker}\n".encode("utf-8", "surrogateescape")
             hasher.update(line)
@@ -247,6 +255,84 @@ class ContentAddressedStore:
         tree_digest = hasher.hexdigest()
         self.put_bytes(bytes(manifest))
         return tree_digest
+
+    def tree_entries(self, digest: str) -> tuple[tuple[str, str], ...]:
+        """Validate a restorable v2 manifest; legacy hash-only listings are read-only."""
+        manifest = self.get_bytes(digest)
+        if not manifest.startswith(b"TREE2\n"):
+            raise IntegrityError("legacy snapshot has no complete-content guarantee")
+        records: list[tuple[str, str]] = []
+        names: set[str] = set()
+        for line in manifest.decode("utf-8", "surrogateescape").splitlines()[1:]:
+            try:
+                name, marker = line.split("\0")
+            except ValueError as exc:
+                raise IntegrityError("invalid snapshot manifest") from exc
+            self._safe_tree_name(name)
+            if name.casefold() in names:
+                raise IntegrityError("snapshot has duplicate/case-colliding paths")
+            names.add(name.casefold())
+            if marker.startswith(_LINK_MARKER):
+                self._safe_tree_name(marker[len(_LINK_MARKER) :].rstrip("/"))
+            elif marker != "DIR":
+                _validate_digest(marker)
+                if not self.verify(marker):
+                    raise IntegrityError(f"snapshot content missing or corrupt: {name}")
+            records.append((name, marker))
+        by_name = {name.casefold(): marker for name, marker in records}
+        for name, _marker in records:
+            for parent in Path(name).parents:
+                if str(parent) == ".":
+                    continue
+                if by_name.get(parent.as_posix().casefold()) != "DIR":
+                    raise IntegrityError(f"snapshot path is below a non-directory: {name}")
+        return tuple(records)
+
+    @staticmethod
+    def _safe_tree_name(name: str) -> None:
+        if (
+            not name
+            or "\\" in name
+            or ":" in name
+            or name.startswith("/")
+            or any(ord(ch) < 32 or ch in '<>"|?*' for ch in name)
+            or any(part.split(".")[0].upper() in {"CON", "PRN", "AUX", "NUL",
+                    *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+                   for part in name.split("/"))
+            or any(part in ("", ".", "..") or part.endswith((".", " ")) for part in name.split("/"))
+        ):
+            raise IntegrityError(f"unsafe snapshot path {name!r}")
+
+    def restore_tree(self, digest: str, destination: Path) -> None:
+        """Restore into a new/empty directory, after validating every referenced blob.
+
+        Internal links are recreated last. Windows may require link privileges;
+        failure is explicit rather than silently substituting different contents.
+        """
+        records = self.tree_entries(digest)
+        target = Path(destination)
+        if target.is_symlink() or target.resolve() != target.absolute():
+            raise IntegrityError("restore destination traverses a link")
+        if target.exists() and (not target.is_dir() or any(target.iterdir())):
+            raise IntegrityError("restore destination must be new or empty")
+        target.mkdir(parents=True, exist_ok=True)
+        for name, marker in records:
+            path = target / name
+            if marker == "DIR":
+                path.mkdir(parents=True, exist_ok=True)
+            elif not marker.startswith(_LINK_MARKER):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(self.get_bytes(marker))
+        for name, marker in records:
+            if marker.startswith(_LINK_MARKER):
+                reference = marker[len(_LINK_MARKER) :]
+                path = target / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                os.symlink(
+                    target / reference.rstrip("/"),
+                    path,
+                    target_is_directory=reference.endswith("/"),
+                )
 
     # ------------------------------------------------------------------- reads
     def get_bytes(self, digest: str) -> bytes:
@@ -258,9 +344,7 @@ class ContentAddressedStore:
             raise IntegrityError(f"cas blob is missing: {digest}") from exc
         actual = hashlib.sha256(data).hexdigest()
         if actual != digest:
-            raise IntegrityError(
-                f"cas blob {digest} is tampered: stored bytes hash to {actual}"
-            )
+            raise IntegrityError(f"cas blob {digest} is tampered: stored bytes hash to {actual}")
         return data
 
     def get_json(self, digest: str) -> Any:

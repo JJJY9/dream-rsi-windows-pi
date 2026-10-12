@@ -1,6 +1,6 @@
 # Algorithm and notation
 
-This document describes the implemented core of [Dream-RSI §3](https://arxiv.org/abs/2609.14858). It also separates the paper's mechanism from this repository's task and platform choices. The independent arithmetic oracle is in `reference/oracle.py`; production scoring is in `src/dream_rsi/score/equation1.py`.
+This document describes the implemented core of [Dream-RSI v2 §3](https://arxiv.org/abs/2609.14858v2). It also separates the paper's mechanism from this repository's task and platform choices. The independent arithmetic oracle is in `reference/oracle.py`; production scoring is in `src/dream_rsi/score/equation1.py`.
 
 ## Objects and parameters
 
@@ -24,11 +24,25 @@ The policy sees a **prefix** of the tree: the root and nodes already revealed by
 
 Online discovery creates new evidence. A world is sealed before it is used for replay. The task's fixed evaluator supplies scores; model-written text is never accepted as a score.
 
+Each attempt receives the complete root-to-parent observation chain and an index of **all** previously completed worlds. The index exposes their recorded public observations, generation records, and candidate workspaces for tool-based reading. These are discovery inputs, separate from the tree under construction. Pi can start a new session because the framework reconstructs the inherited context explicitly. The bounded event log is a diagnostic aid; a separate semantic-message log preserves complete finalized messages and tool results.
+
+Evaluator `detail` is archived privately. Only explicitly declared `public_detail`, measured score/status, and error type enter discovery and policy observations. Task evaluators should populate `public_detail` with useful diagnostic feedback without revealing private test inputs. The context directory is a read-only input convention, not a filesystem sandbox; the framework retains its authoritative hash-verified copy in CAS.
+
+After the last world is sealed, a final offline selection is performed and stored as `pi_N.py` and `final_policy_id`. Thus N normally completed, scoreable iterations have N selections. The last online world records the policy that actually generated it, which can differ from the final policy. No scoreable history produces an explicit skipped-final-selection event; a call-budget cut remains recorded even when an incumbent-only contest can complete.
+
 ## Historical replay
 
 Replay begins with only the root of a sealed world visible. At each round, the policy receives the current visible prefix and selects legal parent nodes. The replay controller reveals the corresponding next children from the immutable world. The policy never receives the hidden full tree. Selecting several parents in one batch uses the same pre-round prefix for every selection.
 
 Replay stops on an empty batch, `K₂` completed rounds, or a fully revealed world. It reads recorded scores and performs **no discovery-agent or evaluator calls**. A nonempty batch counts as a round even if it reveals no new child.
+
+Online and replay both load a fresh isolated policy process for every decision, so module state cannot persist across rounds or rho values. This costs process launches but preserves identical decision semantics. Replay records each visible observation, selected batch, and newly revealed public node results, including empty stopping decisions. The verifier reconstructs these traces without calling a model, evaluator, or policy. Policy-development feedback includes these readable trajectories from the just-evaluated version.
+
+## Artifact versions and resume
+
+The SQLite DTO envelope remains version 1 with backward-readable additions. New nodes use `observation_format=2`, new replay episodes use `trajectory_format=2`, and new worlds use the v2 digest header. CAS snapshots start with `TREE2`, store all referenced file bytes, preserve directories, normalize internal links, reject special files, and restore only into new/empty targets. Restoration validates all file blobs and paths first; creating links on Windows requires the usual OS permissions.
+
+Old world digests remain readable under the original header. Legacy observation records and hash-only workspace manifests cannot be promoted to complete context. The configuration digest now pins the v2 context implementation, so old runs cannot silently resume under changed semantics. `verify_run.py` reports legacy/incomplete contexts and decision traces as failures. A crash after the final seal can resume the final contest; completed contests are reused. Interrupted model revisions with uncertain outcomes fail closed rather than repeat potentially paid calls.
 
 ## Eq. (1): score on one world
 

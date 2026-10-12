@@ -21,6 +21,7 @@ from .score.equation1 import RHO_GRID
 #: Directory names that must never enter a workspace digest.
 DIGEST_EXCLUDES: tuple[str, ...] = (
     "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".git",
+    ".env", ".env.*", "*.key", "*.pem",
 )
 
 BACKENDS = ("fixture", "dsh", "pi")
@@ -207,6 +208,7 @@ class Config:
     def to_dict(self) -> dict[str, Any]:
         return {
             "backend": self.backend,
+            "algorithm_revision": "dream-rsi-2609.14858v2-context2",
             # In the digest on purpose: swapping the developer changes what
             # produced every revision, so a resume must not be allowed to
             # continue a run under a different one.

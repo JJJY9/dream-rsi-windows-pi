@@ -19,7 +19,7 @@ import hashlib
 import importlib.util
 import json
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -36,18 +36,23 @@ from dream_rsi.domain.models import (  # noqa: E402
     Node,
     PolicyState,
     PolicyVersion,
-    ReplayEpisode,
     Revision,
     Run,
     RunMode,
     RunState,
     ScoreRecord,
-    StopReason,
     World,
     WorldState,
 )
 from dream_rsi.domain.tree import SealedWorld  # noqa: E402
+from dream_rsi.runtime.context import (  # noqa: E402
+    OBSERVATION_FORMAT,
+    ContinuationContext,
+    canonical,
+)
+from dream_rsi.runtime.replay import replay_world  # noqa: E402
 from dream_rsi.score.equation1 import equation1  # noqa: E402
+from dream_rsi.storage.cas import ContentAddressedStore  # noqa: E402
 from dream_rsi.storage.sqlite_registry import Registry  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location(
@@ -60,7 +65,7 @@ _spec.loader.exec_module(verify_run)
 
 #: The parameters the synthetic run is built and declared with. They are *not*
 #: the tool's defaults, so the provenance check has to do real work.
-OUTER_ROUNDS = 2
+OUTER_ROUNDS = 1
 K1 = 1
 M = 2
 
@@ -142,6 +147,11 @@ def _build(
     )
 
     # ---------------------------------------------------------------- worlds
+    store = ContentAddressedStore(cfg.cas_root)
+    seed = project / "seed"
+    seed.mkdir()
+    (seed / "candidate.py").write_text("candidate", encoding="utf-8")
+    snapshot = store.put_tree(seed)
     worlds: list[World] = []
     for t in range(OUTER_ROUNDS):
         world_id = f"{run_id}-w{t}"
@@ -149,7 +159,31 @@ def _build(
         nodes = [
             _node(world_id, root_id, None, 0, 0.0),
             _node(world_id, f"{world_id}-n1", root_id, 1, 1.0),
+            _node(world_id, f"{world_id}-n2", root_id, 2, .5),
         ]
+        root_record = {"format": OBSERVATION_FORMAT, "world_id": world_id,
+                       "node_id": root_id, "parent_id": None,
+                       "workspace_snapshot_digest": snapshot,
+                       "generation_digest": None, "public": {"score": 0.0}}
+        root_digest = store.put_json(root_record)
+        nodes[0] = replace(nodes[0], workspace_snapshot_digest=snapshot,
+                           observation_digest=root_digest)
+        for index in (1, 2):
+            node = nodes[index]
+            public = {"score": node.score, "status": "SUCCESS", "diagnostics": {}}
+            context_digest = store.put_json(ContinuationContext(root_id, (canonical(root_record),)).to_dict())
+            generation = store.put_json({"format": "dream-rsi-generation-v2",
+                                         "context_digest": context_digest})
+            evaluation = store.put_json({"format": "dream-rsi-evaluation-v2",
+                                         "score": node.score, "public_detail": {}})
+            observation = store.put_json({"format": OBSERVATION_FORMAT,
+                "world_id": world_id, "node_id": node.node_id, "parent_id": root_id,
+                "parent_observation_digest": root_digest, "workspace_snapshot_digest": snapshot,
+                "context_digest": context_digest, "generation_digest": generation, "public": public})
+            nodes[index] = replace(node, depth=1, observation_digest=observation,
+                workspace_snapshot_digest=snapshot, observation_format=2,
+                public_observation_json=canonical(public), agent_session_digest=generation,
+                evaluator_result_digest=evaluation)
         # The world row comes first: nodes carry a foreign key to it.
         world = World(
             world_id=world_id, outer_t=t, run_id=run_id, root_id=root_id,
@@ -169,7 +203,7 @@ def _build(
     incumbent_source = "def select(observation, rho):\n    return []\n"
     (policy_root / "pi_0.py").write_text(incumbent_source, encoding="utf-8", newline="\n")
 
-    revision_body = "def select(observation, rho):\n    return [observation.node_ids[-1]]\n"
+    revision_body = "def select(observation, rho):\n    return [observation.node_ids[0]] if observation.completed_rounds == 0 else []\n"
     header = "# revision m=1 at iteration t=1; fixture\n"
     proposal_dir = policy_root / "proposals_t1"
     proposal_dir.mkdir(parents=True, exist_ok=True)
@@ -194,36 +228,31 @@ def _build(
     ))
 
     # --------------------------------------------------------------- replays
-    # The revision attains quality 1.0 where the incumbent attains 0.5, so the
-    # contest has a winner that is not the incumbent.
-    quality = {versions["incumbent"]: 0.5, versions["revision"]: 1.0}
+    # The revision reveals one optimal node before stopping; the incumbent
+    # stops at the root. The contest therefore has a non-incumbent winner.
     world0 = worlds[0].world_id
     scored_versions = [versions["incumbent"]]
     if score_revision:
         scored_versions.append(versions["revision"])
     scores: dict[tuple[str, str], float] = {}
     for vid in scored_versions:
+        sealed = SealedWorld.from_nodes(world0, registry.list_nodes(world0), root_id=worlds[0].root_id)
         episodes = [
-            ReplayEpisode(
-                episode_id=f"{vid}-{world0}-{rho}", world_id=world0,
-                policy_version_id=vid, rho=rho, n=0, kstar=0,
-                best_score=quality[vid], attained_quality=quality[vid],
-                selected_batches=(), revealed_order=(),
-                stop_reason=StopReason.MAX_ROUNDS,
-                replay_digest=_hex(f"{vid}-{world0}-{rho}"),
-                created_at=T1,
-            )
+            replace(replay_world(sealed,
+                lambda obs, rho, selected=vid: [obs.node_ids[0]] if selected == versions["revision"] and obs.completed_rounds == 0 else [],
+                policy_version_id=vid, rho=rho, max_parallelism=cfg.loop.W,
+                max_rounds=cfg.loop.K2), created_at=T1)
             for rho in (0.0, 0.25, 0.5, 0.75, 1.0)
         ]
         for episode in episodes:
             registry.add_replay(episode)
         result = equation1(
-            episodes, b_count=1, s_best=1.0, lambda_weight=0.1,
+            episodes, b_count=2, s_best=1.0, lambda_weight=0.1,
             expected_rhos=(0.0, 0.25, 0.5, 0.75, 1.0),
         )
         scores[(vid, world0)] = result.value
         registry.add_score(ScoreRecord(
-            policy_version_id=vid, world_id=world0, b_count=1, s_best=1.0,
+            policy_version_id=vid, world_id=world0, b_count=2, s_best=1.0,
             five_points=result.points, frontier=result.frontier, hv=result.hv,
             parallel_penalty=result.penalty, lambda_weight=0.1, value=result.value,
             created_at=T1,
@@ -386,6 +415,23 @@ def test_declared_parameters_are_proven_against_the_run(tmp_path: Path) -> None:
         fixture.registry.close()
     assert "parameters.cfg_digest_matches" in failed
     assert "run.completed" in failed
+
+
+@pytest.mark.parametrize("changed", [{"K2": 2}, {"W": 1}, {"agent_timeout_s": 240}])
+def test_declared_replay_and_timeout_parameters_are_proven(
+    tmp_path: Path, changed: dict[str, Any],
+) -> None:
+    fixture = _build(tmp_path)
+    try:
+        declared = verify_run.Expectations(
+            backend="pi", developer="llm", provider="cc-switch-deep-seek",
+            model="deepseek-v4-pro", outer_rounds=OUTER_ROUNDS, K1=K1, M=M,
+        )
+        wrong = replace(declared, **changed)
+        checks = verify_run.verify(fixture.registry, fixture.cfg, fixture.run_id, wrong)
+        assert "parameters.cfg_digest_matches" in {row["check"] for row in checks.failed}
+    finally:
+        fixture.registry.close()
 
 
 if __name__ == "__main__":  # pragma: no cover

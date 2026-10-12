@@ -492,6 +492,7 @@ def _run(args: argparse.Namespace, *, live_required: bool) -> int:
              "nodes": w.node_count, "B": w.b_count, "S": w.s_best}
             for w in outcome.worlds
         ],
+        "final_policy_id": outcome.final_policy_id,
         "selections": [
             {"t": s.iteration_t, "selected": s.selected_policy_id,
              "deployed_again": s.deployed_again, "reason": s.reason,

@@ -23,7 +23,14 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from .base import GeneratedAttempt, HistoryEntry, TaskSpec, digest_file, digest_text
+from .base import (
+    ContinuationContext,
+    GeneratedAttempt,
+    HistoryEntry,
+    TaskSpec,
+    digest_file,
+    digest_text,
+)
 
 _MARKER = re.compile(r"^#\s*STRATEGY:\s*([a-z_]+)\s*$", re.MULTILINE)
 
@@ -192,6 +199,7 @@ class FixtureDiscoveryBackend:
         history: Sequence[HistoryEntry],
         output_workspace: Path,
         invocation_id: str,
+        context: ContinuationContext | None = None,
     ) -> GeneratedAttempt:
         started = time.monotonic()
         parent_workspace = Path(parent_workspace)

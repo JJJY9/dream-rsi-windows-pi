@@ -1,5 +1,16 @@
 # Validation scope
 
+## Current v2 changes
+
+The 2026-10-12 implementation adds explicit branch observation inheritance,
+complete historical context, restorable content snapshots, per-decision policy
+state isolation, complete replay decision records, and the final offline
+selection. The earlier audit below covers the previous revision and does not
+validate these changes. Current evidence and its live/fixture distinction are
+recorded in [V2 acceptance](V2_ACCEPTANCE.md).
+
+## Previous revision audit
+
 The independent local audit completed on 2026-10-11 accepted the **Pi-only core §3 mechanism** on native Windows. Its checked run had three sealed scoreable worlds, two contested policy selections, seven successful Pi discovery calls, and four successful model calls writing policy revisions. Recorded replay episodes made zero discovery-agent and evaluator calls. An independent arithmetic path recomputed recorded and held-out Eq. (1) values to within `1e-12`.
 
 These facts support the implementation claim: online discovery, fixed evaluation, sequential policy revision, historical replay, Eq. (1) scoring, selection, and deployment all executed. The demonstration task was small and saturated. The audit therefore did **not** establish useful self-improvement across a broad task distribution or reproduce the paper's §4 benchmark results. DSH live operation and numerical coverage targets were not verified.

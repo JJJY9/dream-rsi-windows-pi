@@ -22,6 +22,8 @@ class EvaluationResult:
     result_digest: str
     detail: Mapping[str, Any] = field(default_factory=dict)
     error_type: str | None = None
+    # Explicitly public diagnostic data. ``detail`` stays in the private archive.
+    public_detail: Mapping[str, Any] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:

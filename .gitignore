@@ -31,3 +31,6 @@ reports/
 
 # Package artifacts
 *.zip
+
+# Locally downloaded reference papers (provenance is committed separately).
+reference/papers/*.pdf

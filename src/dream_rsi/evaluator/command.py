@@ -208,6 +208,9 @@ class FixedCommandEvaluator:
             result_digest=_digest(payload),
             detail={**base_detail, "harness_payload": payload},
             error_type=error_type,
+            public_detail={key: payload[key] for key in
+                           ("public_diagnostics", "optimal_count", "instance_count")
+                           if key in payload},
         )
 
 

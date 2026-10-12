@@ -24,6 +24,7 @@ from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
+from ..domain.errors import IntegrityError
 from ..domain.models import Node, ReplayEpisode, StopReason, new_id
 from ..policy.protocol import PrefixObservation
 from ..policy.validation import validate_batch
@@ -96,6 +97,7 @@ def replay_world(
     no_progress = 0
     stop_reason = StopReason.MAX_ROUNDS  # the paper's K2 exhaustion
     select_calls = 0
+    decisions: list[str] = []
 
     while rounds < max_rounds:
         if len(revealed) == total:
@@ -111,6 +113,8 @@ def replay_world(
             max_parallelism=max_parallelism,
         )
         if not batch:
+            decisions.append(json.dumps({"observation": observation.to_dict(),
+                                         "batch": [], "revealed": []}, sort_keys=True))
             stop_reason = StopReason.STOP_EMPTY_BATCH
             break
         # Simultaneous batch: every child is resolved against the SAME pre-round
@@ -119,6 +123,10 @@ def replay_world(
         action_trace.append(batch)
         rounds += 1  # per §3 every NONEMPTY batch counts, including no-progress
         fresh = [c for c in children if c is not None]
+        decisions.append(json.dumps({"observation": observation.to_dict(),
+                                     "batch": list(batch),
+                                     "revealed": [world.observation({c}, rounds, max_parallelism).nodes[0].to_dict()
+                                                  for c in fresh]}, sort_keys=True))
         if not fresh:
             no_progress += 1
         revealed.update(fresh)
@@ -146,6 +154,8 @@ def replay_world(
         "revealed_order": list(revealed_order),
         "selected_batches": [list(b) for b in action_trace],
         "world_digest": world.world_digest(),
+        "trajectory_format": 2,
+        "decision_trace": decisions,
     }
     return ReplayEpisode(
         episode_id=new_id("replay"),
@@ -163,6 +173,8 @@ def replay_world(
         no_progress_count=no_progress,
         discovery_agent_calls=0,
         evaluator_calls=0,
+        trajectory_format=2,
+        decision_trace=tuple(decisions),
     )
 
 
@@ -187,6 +199,28 @@ def replay_all_rhos(
         )
         for rho in rho_grid
     )
+
+
+def validate_episode_trace(world: SealedWorldLike, episode: ReplayEpisode,
+                           max_parallelism: int, max_rounds: int) -> None:
+    """Reconstruct every decision from recorded actions, without running policy/agent."""
+    if episode.trajectory_format != 2:
+        raise IntegrityError("legacy replay has no complete decision trace")
+    batches = iter(json.loads(step)["batch"] for step in episode.decision_trace)
+
+    def recorded_action(_observation: PrefixObservation, _rho: float) -> Sequence[str]:
+        try:
+            return next(batches)
+        except StopIteration as exc:
+            raise IntegrityError("replay trace is missing a decision") from exc
+
+    reproduced = replay_world(world, recorded_action,
+        policy_version_id=episode.policy_version_id, rho=episode.rho,
+        max_parallelism=max_parallelism, max_rounds=max_rounds)
+    for name in ("decision_trace", "selected_batches", "revealed_order", "n", "kstar",
+                 "best_score", "attained_quality", "stop_reason", "replay_digest"):
+        if getattr(reproduced, name) != getattr(episode, name):
+            raise IntegrityError(f"replay trace does not reproduce {name}")
 
 
 __all__ = [
