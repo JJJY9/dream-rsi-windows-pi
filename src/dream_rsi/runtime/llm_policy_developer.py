@@ -32,9 +32,33 @@ import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from ..adapters._pi_session import PiSessionResult, run_pi_prompt
+from ..adapters.claude_code import run_claude_prompt
 from .policy_development import Proposal, StaticCheck, validate_policy_source
+
+
+class AgentCallResult(Protocol):
+    """Structural view of one agent round trip.
+
+    Declared with read-only members so the frozen ``PiSessionResult`` and
+    ``ClaudeSessionResult`` dataclasses both satisfy it without either
+    transport knowing about the other.
+    """
+
+    @property
+    def ok(self) -> bool: ...
+    @property
+    def final_text(self) -> str: ...
+    @property
+    def session_id(self) -> str | None: ...
+    @property
+    def error_type(self) -> str | None: ...
+    @property
+    def error(self) -> str | None: ...
+    @property
+    def failed(self) -> bool: ...
 
 #: Delimiters the model is told to use. Plain sentinels rather than a Markdown
 #: fence because a model that also writes prose about its change will happily
@@ -276,7 +300,7 @@ class LlmPolicyDeveloper:
 
     def _call(
         self, *, prompt: str, iteration_t: int, m: int, attempt: int
-    ) -> PiSessionResult:
+    ) -> AgentCallResult:
         session_dir = self._session_dir(iteration_t, m, attempt)
         result = run_pi_prompt(
             request={
@@ -402,11 +426,68 @@ class LlmPolicyDeveloper:
         return None, last_problem
 
 
+class ClaudePolicyDeveloper(LlmPolicyDeveloper):
+    """Live: one real headless-Claude-Code call per candidate revision.
+
+    Same prompt, role rotation, screening and provenance rules as
+    :class:`LlmPolicyDeveloper`; only the agent transport differs
+    (``claude -p`` instead of Pi's RPC mode). ``provider``/``model`` are
+    recorded for provenance exactly as before — the model is also passed to
+    the CLI as ``--model`` so the run can never be attributed to a model the
+    CLI picked for itself.
+    """
+
+    developer_id = "llm-claude"
+
+    def __init__(
+        self,
+        *,
+        workdir_root: Path,
+        provider: str,
+        model: str,
+        timeout_s: float = 900.0,
+        python_executable: str | None = None,
+        memory_limit_mb: int | None = 4096,
+        executable: str | None = None,
+    ) -> None:
+        super().__init__(
+            workdir_root=workdir_root,
+            provider=provider,
+            model=model,
+            timeout_s=timeout_s,
+            python_executable=python_executable,
+            memory_limit_mb=memory_limit_mb,
+        )
+        self.executable = executable
+
+    def _call(
+        self, *, prompt: str, iteration_t: int, m: int, attempt: int
+    ) -> AgentCallResult:
+        session_dir = self._session_dir(iteration_t, m, attempt)
+        result = run_claude_prompt(
+            prompt=prompt,
+            cwd=session_dir,
+            model=self.model,
+            timeout_s=self.timeout_s,
+            executable=self.executable,
+            memory_limit_mb=self.memory_limit_mb,
+        )
+        self.sessions.append({
+            "iteration_t": iteration_t, "m": m, "attempt": attempt,
+            "ok": result.ok, "error_type": result.error_type,
+            "session_id": result.session_id, "duration_s": round(result.duration_s, 3),
+            "total_cost_usd": result.total_cost_usd,
+        })
+        return result
+
+
 __all__ = [
     "BEGIN",
     "END",
     "MAX_ATTEMPTS_PER_REVISION",
     "ROLES",
+    "AgentCallResult",
+    "ClaudePolicyDeveloper",
     "ExplorationRole",
     "LlmPolicyDeveloper",
     "build_developer_prompt",

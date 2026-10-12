@@ -23,12 +23,13 @@ DIGEST_EXCLUDES: tuple[str, ...] = (
     "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".git",
 )
 
-BACKENDS = ("fixture", "dsh", "pi")
+BACKENDS = ("fixture", "dsh", "pi", "claude")
 
 #: Who writes the candidate policy revisions. `scripted` emits bundled
-#: constants and is offline; `llm` makes a real model call per revision and is
-#: the only setting under which the whole loop is live.
-DEVELOPERS = ("scripted", "llm")
+#: constants and is offline; `llm` makes a real model call per revision through
+#: Pi and `llm-claude` does the same through headless Claude Code — either one
+#: is the only setting under which the whole loop is live.
+DEVELOPERS = ("scripted", "llm", "llm-claude")
 
 
 @dataclass(frozen=True)
@@ -273,7 +274,7 @@ def resolve_identity(
 # than discovered by listing ``tasks/``: discovery would let a stray directory
 # become a runnable task by accident, and the task name is part of ``cfg_digest``,
 # so it has to mean the same thing on every machine.
-KNOWN_TASKS: tuple[str, ...] = ("knapsack",)
+KNOWN_TASKS: tuple[str, ...] = ("knapsack", "packing")
 DEFAULT_TASK = "knapsack"
 
 
