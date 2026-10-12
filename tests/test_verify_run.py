@@ -297,7 +297,8 @@ def _build(
 def _expectations(*, rollout_cap: int = K1) -> Any:
     return verify_run.Expectations(
         backend="pi", developer="llm", provider="cc-switch-deep-seek",
-        model="deepseek-v4-pro", outer_rounds=OUTER_ROUNDS, K1=rollout_cap, M=M,
+        model="deepseek-v4-pro", outer_rounds=OUTER_ROUNDS, K1=rollout_cap,
+        W=4, M=M,
     )
 
 
@@ -378,7 +379,7 @@ def test_declared_parameters_are_proven_against_the_run(tmp_path: Path) -> None:
     try:
         wrong = verify_run.Expectations(
             backend="pi", developer="llm", provider="cc-switch-deep-seek",
-            model="deepseek-v4-pro", outer_rounds=3, K1=2, M=3,
+            model="deepseek-v4-pro", outer_rounds=3, K1=2, W=4, M=3,
         )
         checks = verify_run.verify(fixture.registry, fixture.cfg, fixture.run_id, wrong)
         failed = {row["check"] for row in checks.failed}

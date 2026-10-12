@@ -107,8 +107,14 @@ def run_claude_prompt(
     timeout_s: float,
     executable: str | None = None,
     memory_limit_mb: int | None = 4096,
+    evidence_dir: Path | None = None,
 ) -> ClaudeSessionResult:
     """Run one prompt through the Claude Code CLI and read back the result.
+
+    ``cwd`` is the working directory the agent runs in. ``evidence_dir`` is
+    where the request and result are persisted for later auditing; it defaults
+    to ``cwd`` but discovery attempts pass their per-attempt run directory, so
+    audit files never end up inside the candidate workspace.
 
     Never raises for a model-side failure: a refused or errored call comes back
     as ``ok=False`` with an ``error_type``, because a failed attempt still has
@@ -117,6 +123,8 @@ def run_claude_prompt(
     started = time.monotonic()
     cwd = Path(cwd).resolve()
     cwd.mkdir(parents=True, exist_ok=True)
+    evidence = Path(evidence_dir).resolve() if evidence_dir is not None else cwd
+    evidence.mkdir(parents=True, exist_ok=True)
 
     exe = executable or find_claude_executable()
     if not exe:
@@ -129,6 +137,21 @@ def run_claude_prompt(
     argv = [exe, "-p", "--output-format", "json", "--dangerously-skip-permissions"]
     if model:
         argv += ["--model", model]
+
+    # Persist the exact request and reply for later auditing, the same way the
+    # Pi transport stores its RPC request: ``tools/verify_run.py`` audits the
+    # developer's input and the accepted reply from these files, and evidence
+    # that only ever existed in memory cannot be audited after the fact.
+    request_path = evidence / "claude_request.json"
+    request_path.write_text(
+        json.dumps(
+            {"prompt": prompt, "model": model, "cwd": str(cwd), "argv": argv},
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    result_path = evidence / "claude_result.json"
 
     # The parent environment is forwarded as-is: authentication for the CLI is
     # whatever the user set up for it (its own stored login, or ANTHROPIC_*).
@@ -192,7 +215,7 @@ def run_claude_prompt(
         error_message = tail or str(payload.get("result") or "")[:400] or error_type
 
     total_cost = payload.get("total_cost_usd")
-    return ClaudeSessionResult(
+    result = ClaudeSessionResult(
         ok=error_type is None,
         final_text=final_text,
         session_id=payload.get("session_id"),
@@ -204,6 +227,25 @@ def run_claude_prompt(
         stderr_tail=stderr[-800:].decode("utf-8", "replace"),
         payload=payload,
     )
+    result_path.write_text(
+        json.dumps(
+            {
+                "ok": result.ok,
+                "error_type": result.error_type,
+                "error": result.error,
+                "session_id": result.session_id,
+                "final_text": result.final_text,
+                "final_response": result.final_text,
+                "duration_s": round(result.duration_s, 3),
+                "timed_out": result.timed_out,
+                "total_cost_usd": result.total_cost_usd,
+            },
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return result
 
 
 class ClaudeCodeBackend:
@@ -269,6 +311,7 @@ class ClaudeCodeBackend:
             timeout_s=self.timeout_s,
             executable=self.executable,
             memory_limit_mb=self.memory_limit_mb,
+            evidence_dir=run_dir,
         )
 
         duration = time.monotonic() - started

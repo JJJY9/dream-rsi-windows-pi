@@ -45,7 +45,7 @@ from typing import Any
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 
-from dream_rsi.config import load_config  # noqa: E402
+from dream_rsi.config import KNOWN_TASKS, load_config  # noqa: E402
 from dream_rsi.domain.models import PolicyState, RunState, WorldState  # noqa: E402
 from dream_rsi.domain.tree import SealedWorld  # noqa: E402
 from dream_rsi.runtime.llm_policy_developer import extract_policy  # noqa: E402
@@ -72,7 +72,10 @@ class Expectations:
     model: str | None
     outer_rounds: int
     K1: int
+    W: int
     M: int
+    agent_timeout_s: float | None = None
+    task: str | None = None
 
 
 class Checks:
@@ -161,7 +164,10 @@ def verify(
             developer=expect.developer,
             provider=expect.provider,
             model=expect.model,
-            overrides={"outer_rounds": expect.outer_rounds, "K1": expect.K1, "M": expect.M},
+            overrides={"outer_rounds": expect.outer_rounds, "K1": expect.K1,
+                       "W": expect.W, "M": expect.M},
+            agent_timeout_s=expect.agent_timeout_s,
+            task=expect.task,
         )
         provenance_detail["rebuilt_cfg_digest"] = rebuilt.cfg_digest
         provenance_detail["recorded_cfg_digest"] = run.cfg_digest
@@ -215,18 +221,29 @@ def verify(
         tampered=tampered, unscoreable=unscoreable,
     )
 
-    # ------------------------------------------------------- real Pi discovery
+    # ------------------------------------------------------- real discovery
+    # Pi writes ``attempt-*/pi_request.json.result.json`` when its worker
+    # finishes; the Claude Code adapter writes ``attempt-*/claude_result.json``.
+    # A result counts as a real discovery call only when the transport reports
+    # success AND carries the agent's own session evidence (Pi: an
+    # ``agent_start`` event after settle; Claude: the CLI's session id) — an
+    # acknowledgement alone is not a completed call.
     agent_dir = config.run_root(run_id) / "agent"
     discovery: list[dict[str, Any]] = []
     per_world_ok: dict[str, int] = {w.world_id: 0 for w in worlds}
-    for result_file in sorted(agent_dir.glob("attempt-*/*.result.json")):
+    result_files = sorted(agent_dir.glob("attempt-*/*.result.json")) + sorted(
+        agent_dir.glob("attempt-*/claude_result.json")
+    )
+    for result_file in result_files:
         attempt_id = result_file.parent.name.removeprefix("attempt-")
         payload = json.loads(result_file.read_text(encoding="utf-8"))
         seen = list(payload.get("event_types") or [])
-        ok = bool(payload.get("ok")) and "agent_start" in seen
+        session_id = payload.get("session_id")
+        ok = bool(payload.get("ok")) and ("agent_start" in seen or bool(session_id))
         record = {
             "attempt": attempt_id, "ok": ok, "error_type": payload.get("error_type"),
-            "agent_start": "agent_start" in seen, "events_kept": len(seen),
+            "agent_start": "agent_start" in seen, "session_recorded": bool(session_id),
+            "events_kept": len(seen),
         }
         discovery.append(record)
         if ok:
@@ -330,16 +347,25 @@ def verify(
                 f"t={rev.iteration_t} m={rev.m}: input {rev.input_policy_id} has no scores"
             )
             continue
-        last_score = max(s.created_at for s in input_scores)
-        if not (rev.created_at > last_score):
+        # Only scores that existed when the revision was requested count: the
+        # incumbent is re-scored on the growing H_t every selection round, and
+        # those later rows must not retroactively invalidate an ordering that
+        # held at request time. What must hold is that the input had already
+        # been scored on every world of H_t.
+        prior = [s for s in input_scores if s.created_at < rev.created_at]
+        required_worlds = {w.world_id for w in worlds if w.outer_t < rev.iteration_t}
+        missing = sorted(required_worlds - {s.world_id for s in prior})
+        last_score = max((s.created_at for s in prior), default=None)
+        if missing:
             order_problems.append(
-                f"t={rev.iteration_t} m={rev.m}: revision recorded at {rev.created_at} "
-                f"but its input was still being scored at {last_score}"
+                f"t={rev.iteration_t} m={rev.m}: input {rev.input_policy_id} was not "
+                f"scored on {missing} before the revision was written at {rev.created_at}"
             )
         order_rows.append({
             "t": rev.iteration_t, "m": rev.m, "input": rev.input_policy_id,
-            "input_scored_worlds": len({s.world_id for s in input_scores}),
-            "last_input_score_at": last_score, "revision_written_at": rev.created_at,
+            "input_scored_worlds_before_request": len({s.world_id for s in prior}),
+            "required_worlds": sorted(required_worlds),
+            "last_prior_input_score_at": last_score, "revision_written_at": rev.created_at,
         })
     checks.add(
         "revisions.scored_before_requested", not order_problems and bool(order_rows),
@@ -354,9 +380,16 @@ def verify(
     feedback_problems: list[str] = []
     feedback_rows: list[dict[str, Any]] = []
     for rev in sorted(revisions, key=lambda r: (r.iteration_t, r.m)):
-        request = (config.run_root(run_id) / "policy_agent"
-                   / f"t{rev.iteration_t}_m{rev.m}_a1" / "pi_request.json")
-        if not request.is_file():
+        session = config.run_root(run_id) / "policy_agent" / f"t{rev.iteration_t}_m{rev.m}_a1"
+        # Either transport's stored request is acceptable evidence: Pi writes
+        # ``pi_request.json``, the Claude Code adapter writes
+        # ``claude_request.json`` (both carry the prompt under ``prompt``).
+        request = next(
+            (p for p in (session / "pi_request.json", session / "claude_request.json")
+             if p.is_file()),
+            None,
+        )
+        if request is None:
             feedback_problems.append(f"t={rev.iteration_t} m={rev.m}: no stored request")
             continue
         prompt = str(json.loads(request.read_text(encoding="utf-8")).get("prompt", ""))
@@ -612,13 +645,21 @@ def verify(
     for rev in sorted(revisions, key=lambda r: (r.iteration_t, r.m)):
         attempts: list[dict[str, Any]] = []
         for session in sorted(session_root.glob(f"t{rev.iteration_t}_m{rev.m}_a*")):
-            result_file = session / "pi_request.json.result.json"
-            if not result_file.is_file():
+            # Pi stores ``pi_request.json.result.json``; the Claude Code
+            # adapter stores ``claude_result.json`` (with the reply text under
+            # both ``final_response`` and ``final_text``). Either backs the reply.
+            result_file = next(
+                (p for p in (session / "pi_request.json.result.json",
+                             session / "claude_result.json")
+                 if p.is_file()),
+                None,
+            )
+            if result_file is None:
                 attempts.append({"session": session.name, "ok": None,
                                  "note": "no result written; the call did not complete"})
                 continue
             payload = json.loads(result_file.read_text(encoding="utf-8"))
-            text = str(payload.get("final_response") or "")
+            text = str(payload.get("final_response") or payload.get("final_text") or "")
             extracted, problem = extract_policy(text)
             attempts.append({
                 "session": session.name, "ok": bool(payload.get("ok")),
@@ -635,8 +676,12 @@ def verify(
             "t": rev.iteration_t, "m": rev.m, "status": rev.status,
             "accepted": accepted,
             "attempts": [{k: v for k, v in a.items() if k != "_source"} for a in attempts],
-            "has_stored_request": (session_root / f"t{rev.iteration_t}_m{rev.m}_a1"
-                                   / "pi_request.json").is_file(),
+            "has_stored_request": any(
+                p.is_file() for p in (
+                    session_root / f"t{rev.iteration_t}_m{rev.m}_a1" / "pi_request.json",
+                    session_root / f"t{rev.iteration_t}_m{rev.m}_a1" / "claude_request.json",
+                )
+            ),
         }
         if accepted:
             proposals = sorted(proposal_root.glob(
@@ -777,7 +822,10 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--expect-model", default="deepseek-v4-pro")
     ap.add_argument("--expect-outer-rounds", type=int, default=3)
     ap.add_argument("--expect-k1", type=int, default=2)
+    ap.add_argument("--expect-workers", type=int, default=4)
     ap.add_argument("--expect-versions", type=int, default=3)
+    ap.add_argument("--expect-agent-timeout-s", type=float, default=None)
+    ap.add_argument("--expect-task", default=None, choices=KNOWN_TASKS)
     args = ap.parse_args(argv[1:])
 
     root = Path(args.project_root).resolve()
@@ -785,7 +833,10 @@ def main(argv: list[str]) -> int:
     expect = Expectations(
         backend=args.expect_backend, developer=args.expect_developer,
         provider=args.expect_provider, model=args.expect_model,
-        outer_rounds=args.expect_outer_rounds, K1=args.expect_k1, M=args.expect_versions,
+        outer_rounds=args.expect_outer_rounds, K1=args.expect_k1,
+        W=args.expect_workers, M=args.expect_versions,
+        agent_timeout_s=args.expect_agent_timeout_s,
+        task=args.expect_task,
     )
     supplied = [a for a in argv[1:] if a.startswith("--expect-")]
     source = ("command line" if supplied
