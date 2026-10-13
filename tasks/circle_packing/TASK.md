@@ -49,5 +49,11 @@ an invalid brilliant one.
   loop *inside* `construct()` (e.g., grow radii while resolving overlaps, or
   move centers apart while keeping radii equal, then grow). Budget your
   iterations so the whole call stays under about a minute.
+- **Keep `candidate.py` current as you work.** A call can end at any moment
+  (there is a wall-clock ceiling on the whole call), and whatever the file
+  contains at that moment is what gets graded. Save your best valid
+  arrangement into `candidate.py` as soon as you have one, and keep improving
+  it in place — do not leave the first write until the end of a long
+  optimization session.
 - Doing nothing scores the shipped initial arrangement; each real geometric
   insight moves the score.
