@@ -275,7 +275,7 @@ def resolve_identity(
 # than discovered by listing ``tasks/``: discovery would let a stray directory
 # become a runnable task by accident, and the task name is part of ``cfg_digest``,
 # so it has to mean the same thing on every machine.
-KNOWN_TASKS: tuple[str, ...] = ("knapsack", "packing")
+KNOWN_TASKS: tuple[str, ...] = ("knapsack", "packing", "circle_packing")
 DEFAULT_TASK = "knapsack"
 
 

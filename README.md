@@ -39,8 +39,9 @@ For a live run, install and authenticate [Pi](https://github.com/earendil-works/
     --outer-rounds 3
 ```
 
-The bundled knapsack task is selected by default (`--task packing` selects the
-second demo task, a max-min-distance construction problem). `--developer llm`
+The bundled knapsack task is selected by default (`--task packing` selects a
+max-min-distance construction problem; `--task circle_packing` selects the
+n=26 circle-packing benchmark mirrored from AlphaEvolve/OpenEvolve). `--developer llm`
 makes policy revisions with a model; `--developer scripted` is a diagnostic
 fixture and must not be reported as a fully live run. Run artifacts are written
 under `.runtime/`, which is excluded from Git.
