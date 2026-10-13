@@ -400,10 +400,15 @@ def verify(
             continue
         prompt = str(json.loads(request.read_text(encoding="utf-8")).get("prompt", ""))
         input_scores = scores.get(rev.input_policy_id, [])
-        mean = _mean([s.value for s in input_scores]) if input_scores else float("nan")
+        # Only scores that existed when the revision was requested count: the
+        # incumbent is re-scored on the growing H_t every selection round, and
+        # those later rows must not retroactively change the mean V the stored
+        # prompt was required to carry.
+        prior = [s for s in input_scores if s.created_at < rev.created_at]
+        mean = _mean([s.value for s in prior]) if prior else float("nan")
         carries_mean = f"{mean:.12f}" in prompt
         carries_id = rev.input_policy_id in prompt
-        carries_worlds = all(s.world_id in prompt for s in input_scores)
+        carries_worlds = all(s.world_id in prompt for s in prior)
         if not (carries_mean and carries_id and carries_worlds):
             feedback_problems.append(
                 f"t={rev.iteration_t} m={rev.m}: prompt missing "
@@ -412,6 +417,7 @@ def verify(
         feedback_rows.append({
             "t": rev.iteration_t, "m": rev.m, "input": rev.input_policy_id,
             "prompt_chars": len(prompt), "mean_V_shown": mean,
+            "input_scores_before_request": len(prior),
             "carries_mean": carries_mean, "carries_policy_id": carries_id,
             "carries_every_world_id": carries_worlds,
         })

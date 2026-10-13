@@ -409,6 +409,51 @@ def test_every_transport_evidence_is_accepted(
     assert "worlds.real_discovery" not in failed
 
 
+def test_a_later_rescore_of_the_input_does_not_break_prompt_evidence(tmp_path: Path) -> None:
+    """The feedback check judges the input by the scores that existed at request time.
+
+    In a real run the incumbent is re-scored on the growing H_t every selection
+    round; a score written *after* a revision was requested must not
+    retroactively change the mean V the stored prompt was required to carry.
+    """
+    T4 = "2026-01-01T00:04:00+00:00"
+    fixture = _build(tmp_path)
+    try:
+        # A real re-score writes the five rho replays and the score together.
+        world1 = f"{fixture.run_id}-w1"
+        episodes = [
+            ReplayEpisode(
+                episode_id=f"late-{rho}", world_id=world1,
+                policy_version_id=fixture.versions["incumbent"], rho=rho,
+                n=0, kstar=0, best_score=0.0, attained_quality=0.0,
+                selected_batches=(), revealed_order=(),
+                stop_reason=StopReason.MAX_ROUNDS,
+                replay_digest=_hex(f"late-{rho}"), created_at=T4,
+            )
+            for rho in (0.0, 0.25, 0.5, 0.75, 1.0)
+        ]
+        for episode in episodes:
+            fixture.registry.add_replay(episode)
+        # Consistent with the five n=0 replays: HV 0, penalty 0, value 0.
+        fixture.registry.add_score(ScoreRecord(
+            policy_version_id=fixture.versions["incumbent"],
+            world_id=world1,
+            b_count=1, s_best=1.0,
+            five_points=((0, 0.0),) * 5, frontier=((0, 0.0),),
+            hv=0.0, parallel_penalty=0.0, lambda_weight=0.1, value=0.0,
+            created_at=T4,
+        ))
+        checks = verify_run.verify(
+            fixture.registry, fixture.cfg, fixture.run_id,
+            _expectations(rollout_cap=fixture.cfg.loop.K1),
+        )
+        failed = {row["check"] for row in checks.failed}
+    finally:
+        fixture.registry.close()
+    assert "revisions.prompt_carries_measured_feedback" not in failed
+    assert "revisions.scored_before_requested" not in failed
+
+
 def test_declared_parameters_are_proven_against_the_run(tmp_path: Path) -> None:
     """Wrong declarations must fail loudly rather than check invented counts."""
     fixture = _build(tmp_path)
