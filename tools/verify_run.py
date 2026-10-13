@@ -223,16 +223,19 @@ def verify(
 
     # ------------------------------------------------------- real discovery
     # Pi writes ``attempt-*/pi_request.json.result.json`` when its worker
-    # finishes; the Claude Code adapter writes ``attempt-*/claude_result.json``.
-    # A result counts as a real discovery call only when the transport reports
-    # success AND carries the agent's own session evidence (Pi: an
-    # ``agent_start`` event after settle; Claude: the CLI's session id) — an
-    # acknowledgement alone is not a completed call.
+    # finishes; the Claude Code adapter writes ``attempt-*/claude_result.json``
+    # and the Codex adapter ``attempt-*/codex_result.json``. A result counts as
+    # a real discovery call only when the transport reports success AND carries
+    # the agent's own session evidence (Pi: an ``agent_start`` event after
+    # settle; Claude: the CLI's session id; Codex: the thread id, recorded as
+    # ``session_id``) — an acknowledgement alone is not a completed call.
     agent_dir = config.run_root(run_id) / "agent"
     discovery: list[dict[str, Any]] = []
     per_world_ok: dict[str, int] = {w.world_id: 0 for w in worlds}
-    result_files = sorted(agent_dir.glob("attempt-*/*.result.json")) + sorted(
-        agent_dir.glob("attempt-*/claude_result.json")
+    result_files = (
+        sorted(agent_dir.glob("attempt-*/*.result.json"))
+        + sorted(agent_dir.glob("attempt-*/claude_result.json"))
+        + sorted(agent_dir.glob("attempt-*/codex_result.json"))
     )
     for result_file in result_files:
         attempt_id = result_file.parent.name.removeprefix("attempt-")
@@ -383,9 +386,12 @@ def verify(
         session = config.run_root(run_id) / "policy_agent" / f"t{rev.iteration_t}_m{rev.m}_a1"
         # Either transport's stored request is acceptable evidence: Pi writes
         # ``pi_request.json``, the Claude Code adapter writes
-        # ``claude_request.json`` (both carry the prompt under ``prompt``).
+        # ``claude_request.json`` and the Codex adapter ``codex_request.json``
+        # (all carry the prompt under ``prompt``).
         request = next(
-            (p for p in (session / "pi_request.json", session / "claude_request.json")
+            (p for p in (session / "pi_request.json",
+                         session / "claude_request.json",
+                         session / "codex_request.json")
              if p.is_file()),
             None,
         )
@@ -646,11 +652,13 @@ def verify(
         attempts: list[dict[str, Any]] = []
         for session in sorted(session_root.glob(f"t{rev.iteration_t}_m{rev.m}_a*")):
             # Pi stores ``pi_request.json.result.json``; the Claude Code
-            # adapter stores ``claude_result.json`` (with the reply text under
-            # both ``final_response`` and ``final_text``). Either backs the reply.
+            # adapter stores ``claude_result.json`` and the Codex adapter
+            # ``codex_result.json`` (both with the reply text under
+            # ``final_response`` and ``final_text``). Any one backs the reply.
             result_file = next(
                 (p for p in (session / "pi_request.json.result.json",
-                             session / "claude_result.json")
+                             session / "claude_result.json",
+                             session / "codex_result.json")
                  if p.is_file()),
                 None,
             )
@@ -680,6 +688,7 @@ def verify(
                 p.is_file() for p in (
                     session_root / f"t{rev.iteration_t}_m{rev.m}_a1" / "pi_request.json",
                     session_root / f"t{rev.iteration_t}_m{rev.m}_a1" / "claude_request.json",
+                    session_root / f"t{rev.iteration_t}_m{rev.m}_a1" / "codex_request.json",
                 )
             ),
         }

@@ -36,6 +36,7 @@ from typing import Protocol
 
 from ..adapters._pi_session import run_pi_prompt
 from ..adapters.claude_code import run_claude_prompt
+from ..adapters.codex import run_codex_prompt
 from .policy_development import Proposal, StaticCheck, validate_policy_source
 
 
@@ -481,6 +482,58 @@ class ClaudePolicyDeveloper(LlmPolicyDeveloper):
         return result
 
 
+class CodexPolicyDeveloper(LlmPolicyDeveloper):
+    """Live: one real headless-Codex call per candidate revision.
+
+    Same prompt, role rotation, screening and provenance rules as
+    :class:`LlmPolicyDeveloper`; only the agent transport differs
+    (``codex exec`` instead of Pi's RPC mode or the Claude Code CLI).
+    """
+
+    developer_id = "llm-codex"
+
+    def __init__(
+        self,
+        *,
+        workdir_root: Path,
+        provider: str,
+        model: str,
+        timeout_s: float = 900.0,
+        python_executable: str | None = None,
+        memory_limit_mb: int | None = 4096,
+        executable: str | None = None,
+    ) -> None:
+        super().__init__(
+            workdir_root=workdir_root,
+            provider=provider,
+            model=model,
+            timeout_s=timeout_s,
+            python_executable=python_executable,
+            memory_limit_mb=memory_limit_mb,
+        )
+        self.executable = executable
+
+    def _call(
+        self, *, prompt: str, iteration_t: int, m: int, attempt: int
+    ) -> AgentCallResult:
+        session_dir = self._session_dir(iteration_t, m, attempt)
+        result = run_codex_prompt(
+            prompt=prompt,
+            cwd=session_dir,
+            model=self.model,
+            timeout_s=self.timeout_s,
+            executable=self.executable,
+            memory_limit_mb=self.memory_limit_mb,
+        )
+        self.sessions.append({
+            "iteration_t": iteration_t, "m": m, "attempt": attempt,
+            "ok": result.ok, "error_type": result.error_type,
+            "session_id": result.session_id, "duration_s": round(result.duration_s, 3),
+            "usage": dict(result.usage),
+        })
+        return result
+
+
 __all__ = [
     "BEGIN",
     "END",
@@ -488,6 +541,7 @@ __all__ = [
     "ROLES",
     "AgentCallResult",
     "ClaudePolicyDeveloper",
+    "CodexPolicyDeveloper",
     "ExplorationRole",
     "LlmPolicyDeveloper",
     "build_developer_prompt",

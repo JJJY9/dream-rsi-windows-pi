@@ -33,7 +33,11 @@ from .domain.models import new_id
 from .evaluator.command import FixedCommandEvaluator
 from .policy.runner import SubprocessPolicyRunner
 from .runtime.controller import Controller, ControllerDeps
-from .runtime.llm_policy_developer import ClaudePolicyDeveloper, LlmPolicyDeveloper
+from .runtime.llm_policy_developer import (
+    ClaudePolicyDeveloper,
+    CodexPolicyDeveloper,
+    LlmPolicyDeveloper,
+)
 from .runtime.online import CallBudget
 from .runtime.policy_development import PolicyDeveloper, ScriptedVariantDeveloper
 from .storage.cas import ContentAddressedStore
@@ -92,6 +96,7 @@ def _build_backend(config: Config, run_id: str) -> DiscoveryBackend:
         "dsh": lambda: _dsh_backend(config, run_id),
         "pi": lambda: _pi_backend(config, run_id),
         "claude": lambda: _claude_backend(config, run_id),
+        "codex": lambda: _codex_backend(config, run_id),
     }
     return kinds[config.backend]()
 
@@ -146,6 +151,22 @@ def _claude_backend(config: Config, run_id: str) -> DiscoveryBackend:
     return backend
 
 
+def _codex_backend(config: Config, run_id: str) -> DiscoveryBackend:
+    from .adapters.codex import CodexBackend
+    # Model naming is mandatory for the same reason as Pi/Claude: the CLI has
+    # its own configured model, and a run only ever names the model it passed.
+    provider, model = _require_live_identity(config, "codex")
+    backend = CodexBackend(
+        workdir_root=config.run_root(run_id) / "agent",
+        provider=provider,
+        model=model,
+        timeout_s=config.timeouts.agent_s,
+        memory_limit_mb=config.timeouts.agent_memory_mb,
+    )
+    backend.preflight()
+    return backend
+
+
 def _build_developer(config: Config, run_id: str) -> PolicyDeveloper | None:
     """The policy-development step, or ``None`` when M=1 (no revisions).
 
@@ -168,6 +189,15 @@ def _build_developer(config: Config, run_id: str) -> PolicyDeveloper | None:
     if config.developer == "llm-claude":
         provider, model = _require_live_identity(config, "claude")
         return ClaudePolicyDeveloper(
+            workdir_root=config.run_root(run_id) / "policy_agent",
+            provider=provider,
+            model=model,
+            timeout_s=config.timeouts.agent_s,
+            memory_limit_mb=config.timeouts.agent_memory_mb,
+        )
+    if config.developer == "llm-codex":
+        provider, model = _require_live_identity(config, "codex")
+        return CodexPolicyDeveloper(
             workdir_root=config.run_root(run_id) / "policy_agent",
             provider=provider,
             model=model,
@@ -239,12 +269,14 @@ def _model_config_present(config: Config) -> dict[str, Any]:
     failures rather than as a silent fallback).
     """
     from .adapters.claude_code import find_claude_executable
+    from .adapters.codex import find_codex_executable
 
     dsh_key = bool(os.environ.get("DEEPSEEK_API_KEY"))
     dsh_base = bool(os.environ.get("DEEPSEEK_BASE_URL"))
     pi_env = sorted(k for k in os.environ if k.upper().startswith("PI_"))
     pi_auth = Path(os.environ.get("USERPROFILE") or Path.home()) / ".pi" / "agent" / "auth.json"
     claude_bin = find_claude_executable()
+    codex_bin = find_codex_executable()
     return {
         "dsh_api_key_set": dsh_key,
         "dsh_base_url_set": dsh_base,
@@ -254,6 +286,8 @@ def _model_config_present(config: Config) -> dict[str, Any]:
         "pi_configured": bool(pi_env) or pi_auth.is_file(),
         "claude_bin": claude_bin,
         "claude_configured": bool(claude_bin),
+        "codex_bin": codex_bin,
+        "codex_configured": bool(codex_bin),
         "provider_override": config.provider,
         "model_override": config.model,
     }
@@ -469,6 +503,7 @@ def _run(args: argparse.Namespace, *, live_required: bool) -> int:
             "dsh": "dsh_configured",
             "pi": "pi_configured",
             "claude": "claude_configured",
+            "codex": "codex_configured",
         }[args.backend]
         if not report[key]:
             _status(
@@ -611,7 +646,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("doctor", help="environment facts -> reports/ENV_STATUS.json")
-    p.add_argument("--backend", default="fixture", choices=("fixture", "dsh", "pi", "claude"))
+    p.add_argument("--backend", default="fixture", choices=("fixture", "dsh", "pi", "claude", "codex"))
     p.add_argument("--task", default=None, choices=KNOWN_TASKS)
     p.set_defaults(func=cmd_doctor)
 
@@ -623,9 +658,9 @@ def build_parser() -> argparse.ArgumentParser:
         ("run", cmd_run, "run the loop (fixture or a live backend)"),
     ):
         p = sub.add_parser(name, help=helptext)
-        p.add_argument("--backend", default="fixture", choices=("fixture", "dsh", "pi", "claude"))
+        p.add_argument("--backend", default="fixture", choices=("fixture", "dsh", "pi", "claude", "codex"))
         p.add_argument("--developer", default="scripted",
-                       choices=("scripted", "llm", "llm-claude"),
+                       choices=("scripted", "llm", "llm-claude", "llm-codex"),
                        help="who writes policy revisions; only 'llm' makes the "
                             "whole loop live (default: scripted, offline)")
         p.add_argument("--provider", default=None)

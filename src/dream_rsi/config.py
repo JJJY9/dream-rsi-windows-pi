@@ -23,13 +23,14 @@ DIGEST_EXCLUDES: tuple[str, ...] = (
     "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".git",
 )
 
-BACKENDS = ("fixture", "dsh", "pi", "claude")
+BACKENDS = ("fixture", "dsh", "pi", "claude", "codex")
 
 #: Who writes the candidate policy revisions. `scripted` emits bundled
 #: constants and is offline; `llm` makes a real model call per revision through
-#: Pi and `llm-claude` does the same through headless Claude Code — either one
-#: is the only setting under which the whole loop is live.
-DEVELOPERS = ("scripted", "llm", "llm-claude")
+#: Pi, `llm-claude` through headless Claude Code and `llm-codex` through
+#: headless Codex — any of the three is the only setting under which the whole
+#: loop is live.
+DEVELOPERS = ("scripted", "llm", "llm-claude", "llm-codex")
 
 
 @dataclass(frozen=True)

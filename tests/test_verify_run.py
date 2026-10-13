@@ -373,20 +373,30 @@ def test_accepted_revision_with_unusable_reply_cannot_pass(tmp_path: Path) -> No
     assert "policy_development.real_pi_calls" in failed
 
 
-def test_claude_transport_evidence_is_accepted(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("request_name", "result_name"),
+    [
+        ("claude_request.json", "claude_result.json"),
+        ("codex_request.json", "codex_result.json"),
+    ],
+    ids=["claude", "codex"],
+)
+def test_every_transport_evidence_is_accepted(
+    tmp_path: Path, request_name: str, result_name: str
+) -> None:
     """The evidence checks read either transport's stored files.
 
-    A Claude run stores ``claude_request.json`` / ``claude_result.json`` where a
-    Pi run stores ``pi_request.json`` / ``pi_request.json.result.json``; the
-    checks must accept both without weakening what they verify.
+    A Claude or Codex run stores request/result files under different names
+    than a Pi run; the checks must accept all of them without weakening what
+    they verify.
     """
     fixture = _build(tmp_path)
     try:
         session = fixture.session_dir
-        (session / "pi_request.json").rename(session / "claude_request.json")
-        (session / "pi_request.json.result.json").rename(session / "claude_result.json")
+        (session / "pi_request.json").rename(session / request_name)
+        (session / "pi_request.json.result.json").rename(session / result_name)
         discovery = fixture.cfg.run_root(fixture.run_id) / "agent" / "attempt-1"
-        (discovery / "pi.result.json").rename(discovery / "claude_result.json")
+        (discovery / "pi.result.json").rename(discovery / result_name)
         checks = verify_run.verify(
             fixture.registry, fixture.cfg, fixture.run_id,
             _expectations(rollout_cap=fixture.cfg.loop.K1),
