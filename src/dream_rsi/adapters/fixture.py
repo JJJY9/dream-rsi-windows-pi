@@ -277,11 +277,30 @@ _TEXTDISTANCE = Recipe(
 )
 
 
+# ---------------------------------------------------------------------------
+# pypinyin (a vendored real project; the artifact is one source file)
+# ---------------------------------------------------------------------------
+
+_PYPINYIN = Recipe(
+    header=_TEXTDISTANCE_HEADER,
+    root_strategy="original",
+    ladder=("shallow_phrase", "style_memo"),
+    bodies={
+        name: (
+            Path(__file__).resolve().parents[3]
+            / "tasks" / "pypinyin" / "variants" / f"{name}.py"
+        ).read_text(encoding="utf-8")
+        for name in ("shallow_phrase", "style_memo")
+    },
+)
+
+
 RECIPES: dict[str, Recipe] = {
     "knapsack": _KNAPSACK,
     "packing": _PACKING,
     "circle_packing": _CIRCLE_PACKING,
     "textdistance": _TEXTDISTANCE,
+    "pypinyin": _PYPINYIN,
 }
 
 

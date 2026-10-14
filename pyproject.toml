@@ -59,6 +59,10 @@ extend-exclude = [
     "tasks/textdistance/initial",
     "tasks/textdistance/reactor",
     "tasks/textdistance/variants",
+    # Same for the pypinyin task.
+    "tasks/pypinyin/initial",
+    "tasks/pypinyin/reactor",
+    "tasks/pypinyin/variants",
 ]
 
 [tool.ruff.lint]

@@ -276,12 +276,13 @@ def resolve_identity(
 # than discovered by listing ``tasks/``: discovery would let a stray directory
 # become a runnable task by accident, and the task name is part of ``cfg_digest``,
 # so it has to mean the same thing on every machine.
-KNOWN_TASKS: tuple[str, ...] = ("knapsack", "packing", "circle_packing", "textdistance")
+KNOWN_TASKS: tuple[str, ...] = ("knapsack", "packing", "circle_packing", "textdistance", "pypinyin")
 
 #: Per-task entry artifact, relative to a workspace root. Tasks not listed here
 #: use the flat ``candidate.py``.
 TASK_ENTRY_FILES: dict[str, str] = {
     "textdistance": "textdistance/algorithms/edit_based.py",
+    "pypinyin": "pypinyin/converter.py",
 }
 DEFAULT_TASK = "knapsack"
 
