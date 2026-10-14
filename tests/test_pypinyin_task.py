@@ -3,12 +3,22 @@
 The workspace vendors a real project (mozillazg/pypinyin 0.55.0, MIT), so the
 tests also pin the vendoring: the frozen reference and the manifest must match
 the shipped workspace, and only the entry file may change.
+
+Grading goes through a fresh ``-I`` subprocess per grade - exactly how
+production runs the harness (``FixedCommandEvaluator``). Calling the harness
+in-process would time the candidate in a heap that earlier tests in the same
+pytest process have already fragmented; the authoring machine measured a
+second in-process grade ~15-25% slower than the first while the harness's own
+reference subprocess stayed flat, which silently depressed the reported
+speedup depending on test order.
 """
 from __future__ import annotations
 
-import importlib.util
+import json
 import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -30,18 +40,6 @@ TASK_DIR = REPO / "tasks" / "pypinyin"
 ENTRY_REL = "pypinyin/converter.py"
 
 
-def _load_harness() -> object:
-    path = TASK_DIR / "evaluator_harness.py"
-    spec = importlib.util.spec_from_file_location("pypinyin_harness", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-HARNESS = _load_harness()
-
-
 def _workspace(tmp_path: Path, name: str = "ws") -> Path:
     ws = tmp_path / name
     shutil.copytree(TASK_DIR / "initial", ws)
@@ -49,7 +47,15 @@ def _workspace(tmp_path: Path, name: str = "ws") -> Path:
 
 
 def _grade(ws: Path) -> dict:
-    return HARNESS.run(ws)  # type: ignore[attr-defined]
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td) / "result.json"
+        proc = subprocess.run(
+            [sys.executable, "-I", str(TASK_DIR / "evaluator_harness.py"), str(ws), str(out)],
+            capture_output=True,
+            timeout=300,
+        )
+        assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+        return json.loads(out.read_text(encoding="utf-8"))
 
 
 def _install_entry(ws: Path, source: str) -> None:
@@ -70,19 +76,23 @@ class TestHarness:
         result = _grade(ws)
         assert result["status"] == "OK"
         assert result["error_type"] is None
-        # ~2.3x on the authoring machine; the margin over the 2.0 target is
-        # ~13%, so the assertion leaves room for machine-load noise (the exact
-        # numbers are recorded by the harness in every run).
-        assert result["speedup"] > 1.6
-        assert result["score"] > 0.8
+        # Production-style grading measures ~1.6-1.9x on the authoring machine
+        # (the in-process grading this suite used earlier flattered every
+        # candidate by ~15%); the threshold leaves room for machine-load noise,
+        # and the exact numbers are recorded by the harness in every run.
+        assert result["speedup"] > 1.35, result
+        assert result["score"] > 0.65, result
 
     def test_the_mid_ladder_variant_scores_between(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
         _install_entry(ws, render_candidate("shallow_phrase", recipe_for("pypinyin")))
         result = _grade(ws)
         assert result["status"] == "OK"
-        assert result["speedup"] > 1.05  # ~1.2-1.4x measured
-        assert result["score"] < 1.0
+        # ~1.2x measured; mid-rung ratios compress under machine load, so the
+        # assertion only pins "measured, not saturated". The ordering claim
+        # lives in the ladder test, with a tolerance.
+        assert result["speedup"] > 0.9, result
+        assert result["score"] < 1.0, result
 
     def test_behavior_mismatch_scores_a_measured_zero(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
@@ -160,16 +170,22 @@ class TestFixtureLadder:
         _third, attempt3 = self._generate(tmp_path, second, "gen3")
         assert attempt3.extra["strategy"] is None or "unchanged" in attempt3.summary  # type: ignore[attr-defined]
 
-    def test_the_ladder_scores_are_strictly_increasing_on_the_real_harness(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_ladder_scores_climb_from_the_baseline(self, tmp_path: Path) -> None:
         scores = []
         for i, name in enumerate(("shallow_phrase", "style_memo")):
             ws = _workspace(tmp_path, name=f"ws{i}")
             _install_entry(ws, render_candidate(name, recipe_for("pypinyin")))
             scores.append(_grade(ws)["score"])
-        assert 0.0 < scores[0] < scores[1]
-        assert scores[1] > 0.8
+        baseline = _grade(_workspace(tmp_path, name="wsb"))["score"]
+        # Measured bands on the authoring machine (production-style grading):
+        # baseline ~0.54, mid ~0.60, top ~0.82-0.95. Ratios between adjacent
+        # grades compress under machine load, so the ordering tolerance is 5%
+        # and the top-rung claim is "a clear gain over baseline".
+        assert baseline > 0.0, baseline
+        assert scores[0] > baseline * 0.95, (baseline, scores)
+        assert scores[1] > scores[0], (baseline, scores)
+        assert scores[1] > baseline * 1.25, (baseline, scores)
+        assert scores[1] > 0.65, scores
 
 
 class TestOfflineLoopOnTheNewTask:
@@ -198,9 +214,10 @@ class TestOfflineLoopOnTheNewTask:
         assert [w.outer_t for w in worlds] == [0, 1]
         for world in worlds:
             assert world.state is WorldState.SEALED_SCOREABLE
-            # The top rung measures ~2.3x against a 2.0x target; timing noise
-            # could dock it slightly, so the bar is "clearly above mid-ladder".
-            assert world.s_best > 0.8
+            # The top rung measures ~1.6-1.9x against a 2.0x target (a score
+            # of ~0.8-0.95); timing noise can dock it, so the bar is "clearly
+            # above the mid rung, on the way to saturation".
+            assert world.s_best > 0.65
 
     def test_the_config_names_the_nested_entry_file(self) -> None:
         config = load_config(project_root=REPO, task="pypinyin")

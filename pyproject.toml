@@ -63,6 +63,10 @@ extend-exclude = [
     "tasks/pypinyin/initial",
     "tasks/pypinyin/reactor",
     "tasks/pypinyin/variants",
+    # Same for the khoj_orgnode task.
+    "tasks/khoj_orgnode/initial",
+    "tasks/khoj_orgnode/reactor",
+    "tasks/khoj_orgnode/variants",
 ]
 
 [tool.ruff.lint]

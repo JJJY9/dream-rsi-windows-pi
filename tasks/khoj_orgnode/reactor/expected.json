@@ -1,0 +1,590 @@
+{
+ "0": [],
+ "1": [
+  {
+   "ancestors": [
+    "C:/kb/notes.org"
+   ],
+   "body": "just plain textwith two lines",
+   "closed": "",
+   "deadline": "",
+   "heading": "C:/kb/notes.org",
+   "level": 0,
+   "logbook": [],
+   "priority": "",
+   "properties": {},
+   "scheduled": "",
+   "tags": [],
+   "todo": ""
+  }
+ ],
+ "10": [
+  {
+   "ancestors": [
+    "C:/kb/notes.org"
+   ],
+   "body": "",
+   "closed": "",
+   "deadline": "",
+   "heading": "boundary hash",
+   "level": 1,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=1"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": ""
+  },
+  {
+   "ancestors": [
+    "C:/kb/notes.org"
+   ],
+   "body": "",
+   "closed": "",
+   "deadline": "",
+   "heading": "end",
+   "level": 1,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=3"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": ""
+  }
+ ],
+ "11": [
+  {
+   "ancestors": [
+    "C:/kb/notes.org"
+   ],
+   "body": "   indented line\n\n\ttab line\n\n",
+   "closed": "",
+   "deadline": "",
+   "heading": "x",
+   "level": 1,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=1"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": ""
+  }
+ ],
+ "12": [
+  {
+   "ancestors": [
+    "C:/kb/notes.org"
+   ],
+   "body": "*nospace not a heading",
+   "closed": "",
+   "deadline": "",
+   "heading": "C:/kb/notes.org",
+   "level": 1,
+   "logbook": [],
+   "priority": "",
+   "properties": {},
+   "scheduled": "",
+   "tags": [],
+   "todo": ""
+  },
+  {
+   "ancestors": [
+    "C:/kb/notes.org"
+   ],
+   "body": "",
+   "closed": "",
+   "deadline": "",
+   "heading": "real",
+   "level": 1,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=2"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": ""
+  }
+ ],
+ "13": [
+  {
+   "ancestors": [
+    "C:/kb/notes.org"
+   ],
+   "body": "Note: a colon in the body\n\n",
+   "closed": "",
+   "deadline": "",
+   "heading": "h",
+   "level": 1,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=1"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": ""
+  },
+  {
+   "ancestors": [
+    "C:/kb/notes.org"
+   ],
+   "body": "",
+   "closed": "",
+   "deadline": "",
+   "heading": "after",
+   "level": 1,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=4"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": ""
+  }
+ ],
+ "2": [
+  {
+   "ancestors": [
+    "C:/kb/notes.org"
+   ],
+   "body": "",
+   "closed": "",
+   "deadline": "",
+   "heading": "Single heading",
+   "level": 1,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=1"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": ""
+  }
+ ],
+ "3": [
+  {
+   "ancestors": [
+    "C:/kb/notes.org"
+   ],
+   "body": "",
+   "closed": "",
+   "deadline": "",
+   "heading": "first",
+   "level": 1,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=1"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": "TODO"
+  },
+  {
+   "ancestors": [
+    "C:/kb/notes.org",
+    "TODO first"
+   ],
+   "body": "body of child\n\n",
+   "closed": "",
+   "deadline": "",
+   "heading": "priority child",
+   "level": 2,
+   "logbook": [],
+   "priority": "A",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=2"
+   },
+   "scheduled": "",
+   "tags": [
+    "tag@x"
+   ],
+   "todo": ""
+  },
+  {
+   "ancestors": [
+    "C:/kb/notes.org",
+    "TODO first",
+    "[#A] priority child"
+   ],
+   "body": "",
+   "closed": "",
+   "deadline": "",
+   "heading": "deep",
+   "level": 3,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=4"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": ""
+  },
+  {
+   "ancestors": [
+    "C:/kb/notes.org"
+   ],
+   "body": "",
+   "closed": "",
+   "deadline": "",
+   "heading": "second",
+   "level": 1,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=5"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": ""
+  }
+ ],
+ "4": [
+  {
+   "ancestors": [
+    "My Notes"
+   ],
+   "body": "",
+   "closed": "",
+   "deadline": "",
+   "heading": "thing",
+   "level": 1,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=3"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": "NEXT"
+  },
+  {
+   "ancestors": [
+    "My Notes"
+   ],
+   "body": "",
+   "closed": "",
+   "deadline": "",
+   "heading": "other",
+   "level": 1,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=4"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": "DONE"
+  }
+ ],
+ "5": [
+  {
+   "ancestors": [
+    "C:/kb/notes.org"
+   ],
+   "body": "body\n\n",
+   "closed": "",
+   "deadline": "",
+   "heading": "heading",
+   "level": 1,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=1"
+   },
+   "scheduled": "",
+   "tags": [
+    "tags",
+    "more"
+   ],
+   "todo": ""
+  }
+ ],
+ "6": [
+  {
+   "ancestors": [
+    "C:/kb/notes.org"
+   ],
+   "body": "",
+   "closed": "",
+   "deadline": "",
+   "heading": "item",
+   "level": 1,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "ID": "id:abc-1",
+    "LINE": "file://C:/kb/notes.org#line=1"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": ""
+  },
+  {
+   "ancestors": [
+    "C:/kb/notes.org"
+   ],
+   "body": "",
+   "closed": "",
+   "deadline": "",
+   "heading": "next",
+   "level": 1,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "ID": "id:abc-2",
+    "LINE": "file://C:/kb/notes.org#line=5",
+    "UNCLOSED": "yes"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": ""
+  }
+ ],
+ "7": [
+  {
+   "ancestors": [
+    "C:/kb/notes.org"
+   ],
+   "body": "",
+   "closed": "",
+   "deadline": "",
+   "heading": "a",
+   "level": 1,
+   "logbook": [
+    [
+     "2026-10-01 10:00:00",
+     "2026-10-01 11:30:00"
+    ]
+   ],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=1"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": ""
+  },
+  {
+   "ancestors": [
+    "C:/kb/notes.org"
+   ],
+   "body": "",
+   "closed": "",
+   "deadline": "",
+   "heading": "b",
+   "level": 1,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=3"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": ""
+  }
+ ],
+ "8": [
+  {
+   "ancestors": [
+    "C:/kb/notes.org"
+   ],
+   "body": "正文行，包含中文标点。\n\n",
+   "closed": "",
+   "deadline": "",
+   "heading": "中文标题与其他内容",
+   "level": 1,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=1"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": ""
+  },
+  {
+   "ancestors": [
+    "C:/kb/notes.org",
+    "中文标题与其他内容"
+   ],
+   "body": "",
+   "closed": "",
+   "deadline": "",
+   "heading": "子标题 :标签:",
+   "level": 2,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=3"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": ""
+  }
+ ],
+ "9": [
+  {
+   "ancestors": [
+    "C:/kb/notes.org"
+   ],
+   "body": "",
+   "closed": "",
+   "deadline": "",
+   "heading": "h1",
+   "level": 1,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=1"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": ""
+  },
+  {
+   "ancestors": [
+    "C:/kb/notes.org"
+   ],
+   "body": "",
+   "closed": "",
+   "deadline": "",
+   "heading": "h2",
+   "level": 1,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=3"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": ""
+  },
+  {
+   "ancestors": [
+    "C:/kb/notes.org",
+    "h2"
+   ],
+   "body": "",
+   "closed": "",
+   "deadline": "",
+   "heading": "h2a",
+   "level": 2,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=5"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": ""
+  },
+  {
+   "ancestors": [
+    "C:/kb/notes.org"
+   ],
+   "body": "",
+   "closed": "",
+   "deadline": "",
+   "heading": "h3",
+   "level": 1,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=6"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": ""
+  }
+ ],
+ "repeat": [
+  {
+   "ancestors": [
+    "C:/kb/notes.org"
+   ],
+   "body": "",
+   "closed": "",
+   "deadline": "",
+   "heading": "first",
+   "level": 1,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=1"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": "TODO"
+  },
+  {
+   "ancestors": [
+    "C:/kb/notes.org",
+    "TODO first"
+   ],
+   "body": "body of child\n\n",
+   "closed": "",
+   "deadline": "",
+   "heading": "priority child",
+   "level": 2,
+   "logbook": [],
+   "priority": "A",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=2"
+   },
+   "scheduled": "",
+   "tags": [
+    "tag@x"
+   ],
+   "todo": ""
+  },
+  {
+   "ancestors": [
+    "C:/kb/notes.org",
+    "TODO first",
+    "[#A] priority child"
+   ],
+   "body": "",
+   "closed": "",
+   "deadline": "",
+   "heading": "deep",
+   "level": 3,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=4"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": ""
+  },
+  {
+   "ancestors": [
+    "C:/kb/notes.org"
+   ],
+   "body": "",
+   "closed": "",
+   "deadline": "",
+   "heading": "second",
+   "level": 1,
+   "logbook": [],
+   "priority": "",
+   "properties": {
+    "LINE": "file://C:/kb/notes.org#line=5"
+   },
+   "scheduled": "",
+   "tags": [],
+   "todo": ""
+  }
+ ]
+}

@@ -295,12 +295,31 @@ _PYPINYIN = Recipe(
 )
 
 
+# ---------------------------------------------------------------------------
+# khoj_orgnode (a vendored real project; the artifact is one source file)
+# ---------------------------------------------------------------------------
+
+_KHOJ = Recipe(
+    header=_TEXTDISTANCE_HEADER,
+    root_strategy="original",
+    ladder=("precompiled", "gated", "routed"),
+    bodies={
+        name: (
+            Path(__file__).resolve().parents[3]
+            / "tasks" / "khoj_orgnode" / "variants" / f"{name}.py"
+        ).read_text(encoding="utf-8")
+        for name in ("precompiled", "gated", "routed")
+    },
+)
+
+
 RECIPES: dict[str, Recipe] = {
     "knapsack": _KNAPSACK,
     "packing": _PACKING,
     "circle_packing": _CIRCLE_PACKING,
     "textdistance": _TEXTDISTANCE,
     "pypinyin": _PYPINYIN,
+    "khoj_orgnode": _KHOJ,
 }
 
 
