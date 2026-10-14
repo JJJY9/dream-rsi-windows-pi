@@ -1,0 +1,8 @@
+[tool.mypy]
+files = ["textdistance"]
+python_version = 3.7
+show_error_codes = true
+disable_error_code = ["override"]
+warn_unused_ignores = true
+allow_redefinition = true
+check_untyped_defs = true

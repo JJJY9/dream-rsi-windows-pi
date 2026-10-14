@@ -248,10 +248,40 @@ _CIRCLE_PACKING = Recipe(
 )
 
 
+# ---------------------------------------------------------------------------
+# textdistance (a vendored real project; the artifact is one source file)
+# ---------------------------------------------------------------------------
+
+#: The variant bodies are real 27KB source files, so they live on disk rather
+#: than inside this module: ``tasks/textdistance/variants/<strategy>.py`` are
+#: full replacements for the entry file, each verified against the frozen
+#: reference by the task's own tests.
+_TEXTDISTANCE_HEADER = "# STRATEGY: {strategy}\n\n"
+
+
+def _load_textdistance_bodies() -> dict[str, str]:
+    variants = (
+        Path(__file__).resolve().parents[3] / "tasks" / "textdistance" / "variants"
+    )
+    return {
+        name: (variants / f"{name}.py").read_text(encoding="utf-8")
+        for name in ("fastdp", "myers")
+    }
+
+
+_TEXTDISTANCE = Recipe(
+    header=_TEXTDISTANCE_HEADER,
+    root_strategy="original",
+    ladder=("fastdp", "myers"),
+    bodies=_load_textdistance_bodies(),
+)
+
+
 RECIPES: dict[str, Recipe] = {
     "knapsack": _KNAPSACK,
     "packing": _PACKING,
     "circle_packing": _CIRCLE_PACKING,
+    "textdistance": _TEXTDISTANCE,
 }
 
 
@@ -330,6 +360,11 @@ class FixtureDiscoveryBackend:
         parent_workspace = Path(parent_workspace)
         output_workspace = Path(output_workspace)
         output_workspace.mkdir(parents=True, exist_ok=True)
+        # Mirror the live backends: an attempt starts from a full copy of the
+        # parent workspace. Single-file tasks make this a no-op in effect, but
+        # tasks whose workspace is a whole vendored project depend on it.
+        if parent_workspace.is_dir() and parent_workspace != output_workspace:
+            shutil.copytree(parent_workspace, output_workspace, dirs_exist_ok=True)
 
         recipe = recipe_for(task.task_id)
         entry = parent_workspace / task.entry_filename

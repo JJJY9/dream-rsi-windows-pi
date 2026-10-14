@@ -1,0 +1,122 @@
+# https://taskfile.dev/
+version: "3"
+
+vars:
+  PYTHON_BIN: python3
+  VENVS: .venvs/
+  LINT_ENV: "{{.VENVS}}lint"
+  BENCHMARK_ENV: "{{.VENVS}}benchmark"
+  TEST_PURE_ENV: "{{.VENVS}}pytest-pure"
+  TEST_EXT_ENV: "{{.VENVS}}pytest-ext"
+
+tasks:
+  venv:create:
+    status:
+      - "test -f {{.ENV}}/bin/activate"
+    cmds:
+      - "{{.PYTHON_BIN}} -m venv {{.ENV}}"
+      - "{{.ENV}}/bin/python3 -m pip install -U pip setuptools wheel"
+  pip:install:
+    sources:
+      - setup.py
+      - "{{.ENV}}/bin/activate"
+    status:
+      - test -f {{.ENV}}/bin/flake8
+    deps:
+      - task: venv:create
+        vars:
+          ENV: "{{.ENV}}"
+    cmds:
+      - "{{.ENV}}/bin/pip install '.[{{.EXTRA}}]'"
+
+  lint:install:
+    cmds:
+      - task: pip:install
+        vars:
+          ENV: "{{.LINT_ENV}}"
+          EXTRA: test,lint
+
+  twine:build:
+    deps:
+      - lint:install
+    cmds:
+      - rm -rf dist/
+      - "{{.LINT_ENV}}/bin/python3 setup.py sdist bdist_wheel"
+  twine:release:
+    deps:
+      - twine:build
+    cmds:
+      - "{{.LINT_ENV}}/bin/twine upload dist/textdistance-*"
+
+  flake8:
+    deps:
+      - lint:install
+    cmds:
+      - "{{.LINT_ENV}}/bin/flake8 ."
+  mypy:
+    deps:
+      - lint:install
+    cmds:
+      - "{{.LINT_ENV}}/bin/mypy"
+
+  pytest-pure:
+    deps:
+      - task: pip:install
+        vars:
+          ENV: "{{.TEST_PURE_ENV}}"
+          EXTRA: test
+    cmds:
+      - "{{.TEST_PURE_ENV}}/bin/pytest  -m 'not external' {{.CLI_ARGS}}"
+
+  pytest-external:
+    deps:
+      - task: pip:install
+        vars:
+          ENV: "{{.TEST_EXT_ENV}}"
+          EXTRA: test,benchmark
+    cmds:
+      - "{{.TEST_EXT_ENV}}/bin/pytest {{.CLI_ARGS}}"
+
+  isort:
+    deps:
+      - lint:install
+    cmds:
+      - "{{.LINT_ENV}}/bin/isort ."
+
+  isort:check:
+    deps:
+      - lint:install
+    cmds:
+      - "{{.LINT_ENV}}/bin/isort --check ."
+
+  benchmark:
+    deps:
+      - task: pip:install
+        vars:
+          ENV: "{{.BENCHMARK_ENV}}"
+          EXTRA: benchmark
+    cmds:
+      - "{{.BENCHMARK_ENV}}/bin/python3 -m textdistance.benchmark"
+
+  # groups
+  format:
+    desc: "run all code formatters"
+    cmds:
+      - task: isort
+  lint:
+    desc: "run all linters"
+    cmds:
+      - task: flake8
+      # - task: mypy
+      - task: isort:check
+  test:
+    desc: "run all tests"
+    cmds:
+      - task: pytest-pure
+      - task: pytest-external
+  all:
+    desc: "run all code formatters, linters, and tests"
+    cmds:
+      - task: format
+      - task: lint
+      - task: test

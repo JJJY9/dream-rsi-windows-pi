@@ -192,9 +192,10 @@ class Config:
     def task_md(self) -> Path:
         return self.task_dir / "TASK.md"
 
-    @property
-    def entry_filename(self) -> str:
-        return "candidate.py"
+    #: The artifact a discovery attempt edits (relative to the workspace root).
+    #: Most tasks use a flat ``candidate.py``; tasks that optimize a file inside
+    #: a vendored real project (e.g. ``textdistance``) name that file here.
+    entry_filename: str = "candidate.py"
 
     def ensure_dirs(self, run_id: str) -> None:
         for path in (
@@ -275,7 +276,13 @@ def resolve_identity(
 # than discovered by listing ``tasks/``: discovery would let a stray directory
 # become a runnable task by accident, and the task name is part of ``cfg_digest``,
 # so it has to mean the same thing on every machine.
-KNOWN_TASKS: tuple[str, ...] = ("knapsack", "packing", "circle_packing")
+KNOWN_TASKS: tuple[str, ...] = ("knapsack", "packing", "circle_packing", "textdistance")
+
+#: Per-task entry artifact, relative to a workspace root. Tasks not listed here
+#: use the flat ``candidate.py``.
+TASK_ENTRY_FILES: dict[str, str] = {
+    "textdistance": "textdistance/algorithms/edit_based.py",
+}
 DEFAULT_TASK = "knapsack"
 
 
@@ -354,6 +361,7 @@ def load_config(
         model=resolved_model,
         run_id=run_id,
         resume=resume,
+        entry_filename=TASK_ENTRY_FILES.get(task_name, "candidate.py"),
     )
 
 

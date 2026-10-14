@@ -53,6 +53,12 @@ extend-exclude = [
     # Their SHA-256 is recorded and checked; rewriting one -- even to sort an
     # import -- would change the program the recorded result describes.
     "diagnostics/frozen",
+    # The textdistance task vendors a real upstream project (MIT, pinned
+    # commit) plus its frozen reference copy and generated variants. These are
+    # upstream bytes graded by hash; a formatter must never touch them.
+    "tasks/textdistance/initial",
+    "tasks/textdistance/reactor",
+    "tasks/textdistance/variants",
 ]
 
 [tool.ruff.lint]
